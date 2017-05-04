@@ -1,0 +1,7 @@
+scripts/backup/*
+scripts/exports/*
+*~
+*.pyc
+
+*.swp
+*.DS_Store
