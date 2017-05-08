@@ -70,7 +70,11 @@ step_list = np.array([[1.0,0.0,4.0]])
 
 # Pre-processing
 off_mat = quaternion_matrix(rot_off)
+rot_mis = quaternion_about_axis(0.05,(0,0,1)) # Miscalibration offsets
+mis_mat = quaternion_matrix(rot_mis)
+off_mat = np.dot(off_mat,mis_mat)
 off_mat[0:3,3] = pos_off
+
 k_file = sio.loadmat('/home/justin/Berkeley/FearingLab/Jumper/jumper/8_Bars/salto1p_v_poly_ctrler4b.mat')#salto1p_poly_ctrler1.mat')
 k = k_file['a_nl'].T
 k = np.delete(k, (2), axis = 0)
@@ -85,7 +89,7 @@ class VRI:
         self.acc = np.array([0,0,0])
         self.step_ind = 0
         self.last_step = time.time()
-        self.yawCmd = 0.05
+        self.yawCmd = 0
         self.telemetry_read = 0
 
         self.unheard_flag = 0
@@ -105,18 +109,18 @@ class VRI:
         queryRobot()
         
         # In-place
-        self.despos = 0.5
-        self.desvel = 0.0
+        self.desx = 0.5
+        self.desvx = 0.0
+        self.desy = 0.0
+        self.desvy = 0.0
         self.startTime = time.time()
 
         # Motor gains format:
         #  [ Kp , Ki , Kd , Kaw , Kff     ,  Kp , Ki , Kd , Kaw , Kff ]
         #    ----------LEFT----------        ---------_RIGHT----------
         motorgains = [100,0,40,0,0,0,0,0,0,0]
-        thrustgains = [70,0,100,70,0,130]
-        
-        #motorgains = [0,0,0,0,0,0,0,0,0,0]
-        #thrustgains = [0,0,0,0,0,0]
+        #thrustgains = [70,0,100,70,0,130]
+        thrustgains = [100,0,130,50,0,100]
 
         duration = 4000
         rightFreq = thrustgains # thruster gains
@@ -178,6 +182,9 @@ class VRI:
     def handle_MJ_state(self, data):
         print "RECEIVED " + str(data.a)
 
+        if data.a == 1:
+            if self.MJ_state == 0:
+                self.MJ_state = 1
         if data.a == 2:
             while self.xbee_sending == 1:
                 rospy.sleep(0.001)
@@ -299,22 +306,30 @@ class VRI:
 
         # Raibert-inspired simple hopping
         # Forwards-backwards
-        #'''
+        '''
         FBvel = 1.0/3.0
         FBslowdown = 0.1 # factor to reduce commanded velocity
         startDwell = 3.0
         offset = -0.5
-        endPt = 3.0
+        yscale = 0.0
+        endPt = 2
         if (time.time()-self.startTime) < startDwell:
-            self.despos = offset
-            self.desvel = 0.0
-        elif (time.time()-self.startTime-startDwell) % (2*endPt/FBvel) > (endPt/FBvel):
-            self.despos = endPt - FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) + offset
-            self.desvel = -FBvel*FBslowdown
+            self.desx = offset
+            self.desvx = 0.0
+
+            self.desy = -yscale*endPt/2.0
+            self.desvy = 0.0
+        elif (time.time()-self.startTime-startDwell) % (2.0*endPt/FBvel) > (endPt/FBvel):
+            self.desx = endPt - FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) + offset
+            self.desvx = -FBvel*FBslowdown
+            self.desy = yscale*(endPt - FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) - endPt/2.0)
+            self.desvy = yscale*self.desvx
         else:
-            self.despos = FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) + offset
-            self.desvel = FBvel*FBslowdown
-        #'''
+            self.desx = FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) + offset
+            self.desvx = FBvel*FBslowdown
+            self.desy = yscale*FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) - endPt/2.0
+            self.desvy = yscale*self.desvx
+        '''
         
         # Vertical variation
         '''
@@ -335,7 +350,7 @@ class VRI:
         Ts = 0.06   # stance time in seconds
         L = 0.225   # leg length in meters
         KV = 0      # not used for position control     
-        Rvdes = -KP*(self.pos[0]-self.despos) - KV*self.vel[0]
+        Rvdes = -KP*(self.pos[0]-self.desx) - KV*self.vel[0]
         Rvdes = max(min(Rvdes,Vmax),-Vmax)
 
         Rxf = self.vel[0]*Ts/2 + K*(self.vel[0] - Rvdes)
@@ -345,7 +360,15 @@ class VRI:
         ctrl = [-Rth,self.params.phase[0], self.params.phase[1]]
 
         # Raibert-inspired controller
-        ctrl = [-self.params.leftFreq[0]*(self.vel[0]-self.desvel) - self.params.leftFreq[1]*max(min(self.pos[0]-self.despos, self.params.leftFreq[2]),-self.params.leftFreq[2]), self.params.phase[0], self.params.phase[1]] # Simple controller
+        ctrl = [-self.params.leftFreq[0]*(self.vel[0]-self.desvx) - self.params.leftFreq[1]*max(min(self.pos[0]-self.desx, self.params.leftFreq[2]),-self.params.leftFreq[2]), self.params.phase[0], self.params.phase[1]] # Simple controller
+        yaw = 0.4 #TODO: make this a parameter
+        roll = self.params.leftFreq[3]*(self.vel[1]-self.desvy) + self.params.leftFreq[4]*max(min(self.pos[1]-self.desy,self.params.leftFreq[5]),-self.params.leftFreq[5])
+
+        # Correct deflections for yaw deflections
+        roll_b = np.cos(euler[0])*roll + np.sin(euler[0])*ctrl[0]
+        pitch_b = np.cos(euler[0])*ctrl[0] - np.sin(euler[0])*roll
+        roll = roll_b
+        ctrl[0] = pitch_b
 
         AngleScaling = 7334;#7334; # rad to 16b 2000deg/s integrated 1000Hz
             # 180(deg)/pi(rad) * 2**16(ticks)/2000(deg/s) * 1000(Hz) = 1877468
@@ -362,21 +385,21 @@ class VRI:
             ctrl[2] = 65
 
         CS = [int(ctrl[0]*AngleScaling),int(ctrl[1]*LengthScaling),int(ctrl[2]*CurrentScaling)]
-        yaw = int(0);
-        roll = int(AngleScaling*(self.params.leftFreq[3]*self.vel[1] + self.params.leftFreq[4]*max(min(self.pos[1],self.params.leftFreq[5]),-self.params.leftFreq[5])));
+        Cyaw = int(AngleScaling*yaw)
+        Croll = int(AngleScaling*roll)
         
         if self.MJ_state == 0:
             self.xbee_sending = 1
-            self.yawCmd = yaw
+            self.yawCmd = Cyaw
 
             '''
-            rot_rol = quaternion_about_axis(roll/AngleScaling,(1,1,-1))
+            rot_rol = quaternion_about_axis(Croll/AngleScaling,(1,1,-1))
             mat_rol = quaternion_matrix()
             rot_pit = quaternion_about_axis()
             mat_pit = quaternion_matrix()
             '''
 
-            toSend = [ES[0], ES[1], ES[2], self.yawCmd, roll, CS[0], CS[1], CS[2]]
+            toSend = [ES[0], ES[1], ES[2], self.yawCmd, Croll, CS[0], CS[1], CS[2]]
             for i in range(8):
                 if toSend[i] > 32767:
                     toSend[i] = 32767
@@ -386,17 +409,17 @@ class VRI:
             self.xbee_sending = 0
             #print(self.step_ind,ctrl[0],ctrl[1],ctrl[2]) # Deadbeat
             #print(self.pos[0],self.pos[1],self.pos[2])
-            #print(self.yawCmd,roll*57/AngleScaling,CS[0]*57/AngleScaling)
+            print(self.yawCmd,Croll*57/AngleScaling,CS[0]*57/AngleScaling)
             #print(euler[0]*57,euler[1]*57,euler[2]*57)
-            #print([ES[0], ES[1], ES[2], self.yawCmd, roll, CS[0]])
-            #print(self.yawCmd, roll, CS[0], CS[1], CS[2]) # Commands
-            #print(roll,ctrl[0],ctrl[1],ctrl[2]) # cmds before scaling
+            #print([ES[0], ES[1], ES[2], self.yawCmd, Croll, CS[0]])
+            #print(self.yawCmd, Croll, CS[0], CS[1], CS[2]) # Commands
+            #print(Croll,ctrl[0],ctrl[1],ctrl[2]) # cmds before scaling
             #print(np.hstack((ctrl.T, [self.acc])))
-            #print(self.despos, self.desvel) # Raibert position
-            print(57*ES[0]/AngleScaling, 57*ES[1]/AngleScaling, 57*ES[2]/AngleScaling)
+            #print(self.desx, self.desvx) # Raibert position
+            #print(57*ES[0]/AngleScaling, 57*ES[1]/AngleScaling, 57*ES[2]/AngleScaling)
 
             # Publish commands
-            self.ctrl_pub_rol.publish(roll)
+            self.ctrl_pub_rol.publish(Croll)
             self.ctrl_pub_pit.publish(CS[0])
             self.ctrl_pub_yaw.publish(self.yawCmd)
             self.ctrl_pub_ret.publish(CS[1])
@@ -405,7 +428,7 @@ class VRI:
 
         elif self.MJ_state == 1:
             self.xbee_sending = 1
-            toSend = [ES[0], ES[1], ES[2], self.yawCmd, 0, 0, 2560, 2560]
+            toSend = [ES[0], ES[1], ES[2], self.yawCmd, 0, 0, 70*256, 70*256]
             xb_send(0, command.INTEGRATED_VICON, pack('8h',*toSend))
             self.xbee_sending = 0
         elif self.MJ_state == 2:

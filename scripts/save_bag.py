@@ -12,6 +12,9 @@ pos_off = [0.0165,0.07531,-0.04] # coords of the robot origin in the Vicon body 
 
 # Pre-processing
 off_mat = quaternion_matrix(rot_off)
+rot_mis = quaternion_about_axis(0.05,(0,0,1)) # Miscalibration offsets
+mis_mat = quaternion_matrix(rot_mis)
+off_mat = np.dot(off_mat,mis_mat)
 off_mat[0:3,3] = pos_off
 
 
