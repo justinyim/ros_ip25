@@ -83,13 +83,11 @@ n_steps = len(step_list)
 
 class VRI:
     def __init__(self):
-        self.pit = 0
         self.pos = np.array([0,0,0])
         self.vel = np.array([0,0,0])
         self.acc = np.array([0,0,0])
         self.step_ind = 0
         self.last_step = time.time()
-        self.yawCmd = 0
         self.telemetry_read = 0
 
         self.unheard_flag = 0
@@ -122,7 +120,7 @@ class VRI:
         #thrustgains = [70,0,100,70,0,130]
         thrustgains = [100,0,130,50,0,100]
 
-        duration = 4000
+        duration = 5000
         rightFreq = thrustgains # thruster gains
         leftFreq = [0.16, 0.2, 0.5, .16, 0.12, 0.25] # Raibert-like gains
         #           xv xp xsat yv yp ysat
@@ -132,7 +130,8 @@ class VRI:
         repeat = False
 
         # Gains for actual Raibert controller
-        #leftFreq = [0.1, 0.015, 0.5, 0.15, 0.12, 0.1] 
+        leftFreq = [0.2, 0.02, 0.5, 0.2, 0.02, 0.2]
+        #           KPx  Kx  Vxmax  KPy  Ky  Vymax          
 
         self.manParams = manueverParams(0,0,0,0,0,0)
         self.params = hallParams(motorgains, duration, rightFreq, leftFreq, phase, telemetry, repeat)
@@ -205,6 +204,7 @@ class VRI:
         return 0
 
     def callback(self, data):
+        # VICON DATA ------------------------------------------------
         # Extract transform from message
         rot = data.transform.rotation
         tr = data.transform.translation
@@ -227,7 +227,6 @@ class VRI:
         '''
         pit = euler[2]
 
-        self.pit = pit
         if self.unheard_flag == 0: # first message
             self.unheard_flag = 1
             self.pos = pos
@@ -249,6 +248,7 @@ class VRI:
                 self.step_ind += 1
             self.last_step = time.time()
 
+        # DEADBEAT CONTROLLER ---------------------------------------
         # Calculate desired takeoff velocity
         #   foot planning
         indNext = min(self.step_ind, n_steps-1)
@@ -304,7 +304,8 @@ class VRI:
             ctrl[1] = -75
             ctrl[2] = -75
 
-        # Raibert-inspired simple hopping
+        # RAIBERT-INSPIRED SIMPLE HOPPING ---------------------------
+        # TRAJECTORIES --------------------------
         # Forwards-backwards
         '''
         FBvel = 1.0/3.0
@@ -329,7 +330,7 @@ class VRI:
             self.desvx = FBvel*FBslowdown
             self.desy = yscale*FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) - endPt/2.0
             self.desvy = yscale*self.desvx
-        '''
+        ''' # end Forwards-backwards
         
         # Vertical variation
         '''
@@ -341,27 +342,50 @@ class VRI:
             self.params.phase[1] = 75
         else:
             self.params.phase[1] = 80
-        '''
+        ''' # end Vertical variation
 
+        # CONTROLLERS ---------------------------
         # Raibert controller
-        KP = self.params.leftFreq[0]
-        K = self.params.leftFreq[1] #Raibert velocity control gain
-        Vmax = self.params.leftFreq[2]
+        #'''
+        # Parameters
+        KPx = self.params.leftFreq[0] #Raibert position control gain
+        Kx = self.params.leftFreq[1] #Raibert velocity control gain
+        Vxmax = self.params.leftFreq[2] #Raibert control max speed
+        KPy = self.params.leftFreq[3]
+        Ky = self.params.leftFreq[4]
+        Vymax = self.params.leftFreq[5]
         Ts = 0.06   # stance time in seconds
         L = 0.225   # leg length in meters
-        KV = 0      # not used for position control     
-        Rvdes = -KP*(self.pos[0]-self.desx) - KV*self.vel[0]
-        Rvdes = max(min(Rvdes,Vmax),-Vmax)
+        KV = 0.5    # between 0 and 1
+        # Desired velocities
+        RB = np.matrix([[np.cos(euler[0]),np.sin(euler[0])],[-np.sin(euler[0]),np.cos(euler[0])]])
+        Berr = np.dot(RB,[[self.pos[0]-self.desx],[self.pos[1]-self.desy]])
+        Bv = np.dot(RB,[[self.vel[0]],[self.vel[1]]])
+        Bvdes = np.dot(RB,[[self.desvx],[self.desvy]])
+        vxdes = -KPx*Berr[0] + KV*Bvdes[0]
+        vxdes = max(min(vxdes,Vxmax),-Vxmax)
+        vydes = -KPy*Berr[1] + KV*Bvdes[1]
+        vydes = max(min(vydes,Vymax),-Vymax)
+        # Desired foot distances
+        xf = Bv[0]*Ts/2 + Kx*(Bv[0] - vxdes)
+        xf = max(min(xf,L/2),-L/2) # limit foot deflection
+        yf = Bv[1]*Ts/2 + Ky*(Bv[1] - vydes)
+        yf = max(min(yf,L/2),-L/2) # limit foot deflection
+        # Roll and pitch angles
+        th = -math.asin(-xf/L) #TODO: fix pitch sign error
+        ph = math.asin(yf/L)
 
-        Rxf = self.vel[0]*Ts/2 + K*(self.vel[0] - Rvdes)
-        Rxf = max(min(Rxf,L),-L)
-        Rth = math.asin(Rxf/L)
-
-        ctrl = [-Rth,self.params.phase[0], self.params.phase[1]]
+        ctrl = [-th, self.params.phase[0], self.params.phase[1]]
+        yaw = 0.0 # TODO: make this a parameter
+        roll = ph
+        #print(int(1000*xf),int(1000*yf))
+        #print(int(57*th),int(57*ph))
+        #''' # end Raibert controller
 
         # Raibert-inspired controller
+        '''
         ctrl = [-self.params.leftFreq[0]*(self.vel[0]-self.desvx) - self.params.leftFreq[1]*max(min(self.pos[0]-self.desx, self.params.leftFreq[2]),-self.params.leftFreq[2]), self.params.phase[0], self.params.phase[1]] # Simple controller
-        yaw = 0.4 #TODO: make this a parameter
+        yaw = 0.0 #TODO: make this a parameter
         roll = self.params.leftFreq[3]*(self.vel[1]-self.desvy) + self.params.leftFreq[4]*max(min(self.pos[1]-self.desy,self.params.leftFreq[5]),-self.params.leftFreq[5])
 
         # Correct deflections for yaw deflections
@@ -369,6 +393,7 @@ class VRI:
         pitch_b = np.cos(euler[0])*ctrl[0] - np.sin(euler[0])*roll
         roll = roll_b
         ctrl[0] = pitch_b
+        ''' # end Raibert-inspired controller
 
         AngleScaling = 7334;#7334; # rad to 16b 2000deg/s integrated 1000Hz
             # 180(deg)/pi(rad) * 2**16(ticks)/2000(deg/s) * 1000(Hz) = 1877468
@@ -377,6 +402,7 @@ class VRI:
         CurrentScaling = 256; # radians to 23.8 fixed pt radians
         ES = [int(euler[0]*AngleScaling),int(euler[1]*AngleScaling),int(euler[2]*AngleScaling)]
 
+        # ROBOT COMMANDS --------------------------------------------
         if np.isnan(ctrl[0]): # NaN check
             ctrl[0] = 0
         if np.isnan(ctrl[1]):
@@ -390,7 +416,6 @@ class VRI:
         
         if self.MJ_state == 0:
             self.xbee_sending = 1
-            self.yawCmd = Cyaw
 
             '''
             rot_rol = quaternion_about_axis(Croll/AngleScaling,(1,1,-1))
@@ -399,7 +424,7 @@ class VRI:
             mat_pit = quaternion_matrix()
             '''
 
-            toSend = [ES[0], ES[1], ES[2], self.yawCmd, Croll, CS[0], CS[1], CS[2]]
+            toSend = [ES[0], ES[1], ES[2], Cyaw, Croll, CS[0], CS[1], CS[2]]
             for i in range(8):
                 if toSend[i] > 32767:
                     toSend[i] = 32767
@@ -407,12 +432,14 @@ class VRI:
                     toSend[i] = -32767
             xb_send(0, command.INTEGRATED_VICON, pack('8h',*toSend))
             self.xbee_sending = 0
+
+            # Printing
             #print(self.step_ind,ctrl[0],ctrl[1],ctrl[2]) # Deadbeat
             #print(self.pos[0],self.pos[1],self.pos[2])
-            print(self.yawCmd,Croll*57/AngleScaling,CS[0]*57/AngleScaling)
+            print(Cyaw*57/AngleScaling,Croll*57/AngleScaling,CS[0]*57/AngleScaling)
             #print(euler[0]*57,euler[1]*57,euler[2]*57)
-            #print([ES[0], ES[1], ES[2], self.yawCmd, Croll, CS[0]])
-            #print(self.yawCmd, Croll, CS[0], CS[1], CS[2]) # Commands
+            #print([ES[0], ES[1], ES[2], Cyaw, Croll, CS[0]])
+            #print(Cyaw, Croll, CS[0], CS[1], CS[2]) # Commands
             #print(Croll,ctrl[0],ctrl[1],ctrl[2]) # cmds before scaling
             #print(np.hstack((ctrl.T, [self.acc])))
             #print(self.desx, self.desvx) # Raibert position
@@ -421,14 +448,13 @@ class VRI:
             # Publish commands
             self.ctrl_pub_rol.publish(Croll)
             self.ctrl_pub_pit.publish(CS[0])
-            self.ctrl_pub_yaw.publish(self.yawCmd)
+            self.ctrl_pub_yaw.publish(Cyaw)
             self.ctrl_pub_ret.publish(CS[1])
             self.ctrl_pub_ext.publish(CS[2])
 
-
         elif self.MJ_state == 1:
             self.xbee_sending = 1
-            toSend = [ES[0], ES[1], ES[2], self.yawCmd, 0, 0, 70*256, 70*256]
+            toSend = [ES[0], ES[1], ES[2], Cyaw, 0, 0, 70*256, 70*256]
             xb_send(0, command.INTEGRATED_VICON, pack('8h',*toSend))
             self.xbee_sending = 0
         elif self.MJ_state == 2:
@@ -441,7 +467,6 @@ class VRI:
             #    flashReadback(self.numSamples, self.params, self.manParams)
             #    self.telemetry_read = 1
 
-                
 
         t = data.header.stamp.to_sec()
         x = np.array([data.transform.rotation.x,data.transform.rotation.y,data.transform.rotation.z,data.transform.rotation.w, data.transform.translation.x,data.transform.translation.y,data.transform.translation.z,t])
