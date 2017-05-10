@@ -70,8 +70,7 @@ step_list = np.array([[1.0,0.0,4.0]])
 
 # Pre-processing
 off_mat = quaternion_matrix(rot_off)
-rot_mis = quaternion_about_axis(0.05,(0,0,1)) # Miscalibration offsets
-mis_mat = quaternion_matrix(rot_mis)
+mis_mat = euler_matrix(-0.03, 0.04, -0.02, 'rxyz')
 off_mat = np.dot(off_mat,mis_mat)
 off_mat[0:3,3] = pos_off
 
@@ -117,8 +116,7 @@ class VRI:
         #  [ Kp , Ki , Kd , Kaw , Kff     ,  Kp , Ki , Kd , Kaw , Kff ]
         #    ----------LEFT----------        ---------_RIGHT----------
         motorgains = [100,0,40,0,0,0,0,0,0,0]
-        #thrustgains = [70,0,100,70,0,130]
-        thrustgains = [100,0,130,50,0,100]
+        thrustgains = [100,0,130,70,0,130]
 
         duration = 5000
         rightFreq = thrustgains # thruster gains
@@ -130,7 +128,7 @@ class VRI:
         repeat = False
 
         # Gains for actual Raibert controller
-        leftFreq = [0.2, 0.02, 0.5, 0.2, 0.02, 0.2]
+        leftFreq = [2, 0.01, 1.0, 2, 0.01, 0.5]
         #           KPx  Kx  Vxmax  KPy  Ky  Vymax          
 
         self.manParams = manueverParams(0,0,0,0,0,0)
@@ -356,7 +354,7 @@ class VRI:
         Vymax = self.params.leftFreq[5]
         Ts = 0.06   # stance time in seconds
         L = 0.225   # leg length in meters
-        KV = 0.5    # between 0 and 1
+        KV = 1.0    # between 0 and 1
         # Desired velocities
         RB = np.matrix([[np.cos(euler[0]),np.sin(euler[0])],[-np.sin(euler[0]),np.cos(euler[0])]])
         Berr = np.dot(RB,[[self.pos[0]-self.desx],[self.pos[1]-self.desy]])
