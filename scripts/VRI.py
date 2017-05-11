@@ -116,7 +116,8 @@ class VRI:
         #  [ Kp , Ki , Kd , Kaw , Kff     ,  Kp , Ki , Kd , Kaw , Kff ]
         #    ----------LEFT----------        ---------_RIGHT----------
         motorgains = [100,0,40,0,0,0,0,0,0,0]
-        thrustgains = [100,0,130,70,0,130]
+        thrustgains = [90,0,130,70,0,130]
+        # roll kp, ki, kd; yaw kp, ki, kd
 
         duration = 5000
         rightFreq = thrustgains # thruster gains
@@ -128,7 +129,7 @@ class VRI:
         repeat = False
 
         # Gains for actual Raibert controller
-        leftFreq = [2, 0.01, 1.0, 2, 0.01, 0.5]
+        leftFreq = [2, 0.01, 1.5, 2, 0.01, 0.75]
         #           KPx  Kx  Vxmax  KPy  Ky  Vymax          
 
         self.manParams = manueverParams(0,0,0,0,0,0)
@@ -306,11 +307,11 @@ class VRI:
         # TRAJECTORIES --------------------------
         # Forwards-backwards
         '''
-        FBvel = 1.0/3.0
-        FBslowdown = 0.1 # factor to reduce commanded velocity
+        FBvel = 1.0/2.0
+        FBslowdown = 1 # factor to reduce commanded velocity
         startDwell = 3.0
-        offset = -0.5
-        yscale = 0.0
+        offset = 0.0
+        yscale = 0.1
         endPt = 2
         if (time.time()-self.startTime) < startDwell:
             self.desx = offset
@@ -318,16 +319,17 @@ class VRI:
 
             self.desy = -yscale*endPt/2.0
             self.desvy = 0.0
-        elif (time.time()-self.startTime-startDwell) % (2.0*endPt/FBvel) > (endPt/FBvel):
+        elif (time.time()-self.startTime-startDwell) % (2.0*endPt/FBvel) > (endPt/FBvel): # backwards
             self.desx = endPt - FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) + offset
             self.desvx = -FBvel*FBslowdown
             self.desy = yscale*(endPt - FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) - endPt/2.0)
             self.desvy = yscale*self.desvx
-        else:
+        else: # forwards
             self.desx = FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) + offset
             self.desvx = FBvel*FBslowdown
-            self.desy = yscale*FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) - endPt/2.0
+            self.desy = yscale*(FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) - endPt/2.0)
             self.desvy = yscale*self.desvx
+        #print(self.desx,self.desvx,self.desy,self.desvy)
         ''' # end Forwards-backwards
         
         # Vertical variation
@@ -341,6 +343,27 @@ class VRI:
         else:
             self.params.phase[1] = 80
         ''' # end Vertical variation
+
+        yaw = 0.0 #TODO: make this a parameter
+        # Rotate in place
+        yawVel = 0.5
+        yawDwell = 3.0
+        ''' # 1
+        yawAmp = 2.0
+        if (time.time()-self.startTime) < yawDwell:
+            yaw = 0.0
+        elif (time.time()-self.startTime-yawDwell+yawAmp/yawVel) % (4.0*yawAmp/yawVel) < (2.0*yawAmp/yawVel):
+            yaw = yawVel*(time.time()-self.startTime-yawDwell+yawAmp/yawVel)%(2.0*yawAmp/yawVel) - yawAmp
+        else:
+            yaw = -yawVel*(time.time()-self.startTime-yawDwell+yawAmp/yawVel)%(2.0*yawAmp/yawVel) - yawAmp 
+        print(yaw)
+        ''' # end Rotate in place 1
+        ''' # 2
+        if (time.time()-self.startTime) < yawDwell:
+            yaw = 0.0
+        else:
+            yaw = (yawVel*(time.time()-self.startTime-yawDwell)+3.14159)%(2*3.14159) - 3.14159
+        ''' # end Rotate in place 2
 
         # CONTROLLERS ---------------------------
         # Raibert controller
@@ -374,7 +397,6 @@ class VRI:
         ph = math.asin(yf/L)
 
         ctrl = [-th, self.params.phase[0], self.params.phase[1]]
-        yaw = 0.0 # TODO: make this a parameter
         roll = ph
         #print(int(1000*xf),int(1000*yf))
         #print(int(57*th),int(57*ph))
@@ -393,6 +415,7 @@ class VRI:
         ctrl[0] = pitch_b
         ''' # end Raibert-inspired controller
 
+        # ROBOT COMMANDS --------------------------------------------
         AngleScaling = 7334;#7334; # rad to 16b 2000deg/s integrated 1000Hz
             # 180(deg)/pi(rad) * 2**16(ticks)/2000(deg/s) * 1000(Hz) = 1877468
             # 1877467 / 2**8 = 7334
@@ -400,7 +423,6 @@ class VRI:
         CurrentScaling = 256; # radians to 23.8 fixed pt radians
         ES = [int(euler[0]*AngleScaling),int(euler[1]*AngleScaling),int(euler[2]*AngleScaling)]
 
-        # ROBOT COMMANDS --------------------------------------------
         if np.isnan(ctrl[0]): # NaN check
             ctrl[0] = 0
         if np.isnan(ctrl[1]):
