@@ -115,8 +115,8 @@ class VRI:
         # Motor gains format:
         #  [ Kp , Ki , Kd , Kaw , Kff     ,  Kp , Ki , Kd , Kaw , Kff ]
         #    ----------LEFT----------        ---------_RIGHT----------
-        motorgains = [100,0,40,0,0,0,0,0,0,0]
-        thrustgains = [90,0,130,70,0,130]
+        motorgains = [80,0,30,0,0,0,0,0,0,0]
+        thrustgains = [80,0,110,60,0,110]
         # roll kp, ki, kd; yaw kp, ki, kd
 
         duration = 5000
@@ -364,6 +364,82 @@ class VRI:
         else:
             yaw = (yawVel*(time.time()-self.startTime-yawDwell)+3.14159)%(2*3.14159) - 3.14159
         ''' # end Rotate in place 2
+
+        # Rectangular path
+        #'''
+        rectPathDwell = 3.0
+        x1 = 0.0 # [m] starting x
+        y1 = -0.5 # [m] starting y
+        x2 = 2.0 # [m] opposite corner x
+        y2 = 0.5 # [m] opposite corner y
+        ta = 4.0 # [s] first leg time
+        tb = 4.0 # [s] second leg time
+        tc = 2.0 # [s] third leg time
+        td = 2.0 # [s] fourth leg time
+        ya = 0.0
+        yb = 3*3.14159/4
+        yc = 3.14159
+        yd = 3.14159/2
+        tturn = 3.0 # [s] turning time
+        per = ta + tb + tc + td + 4*tturn
+        t = (time.time()-self.startTime-rectPathDwell) % per
+        if time.time()-self.startTime < rectPathDwell: # Dwell
+            self.desx = x1
+            self.desy = y1
+            self.desvx = 0.0
+            self.desvy = 0.0
+            yaw = ya
+        elif t < ta: # First leg
+            self.desx = x1 + (x2-x1)*(t/ta)
+            self.desvx = (x2-x1)/ta
+            self.desy = y1
+            self.desvy = 0.0
+            yaw = ya
+        elif t-ta < tturn: # First Turn
+            self.desx = x2
+            self.desvx = 0.0
+            self.desy = y1
+            self.desvy = 0.0
+            yaw = ya + (yb-ya)*((t-ta)/tturn)
+        elif t-ta-tturn < tb: # Second leg
+            self.desx = x2
+            self.desvx = 0.0
+            self.desy = y1 + (y2-y1)*((t-ta-tturn)/tb)
+            self.desvy = (y2-y1)/tb
+            yaw = yb
+        elif t-ta-tb-tturn < tturn: # Second turn
+            self.desx = x2
+            self.desvx = 0.0
+            self.desy = y2
+            self.desvy = 0.0
+            yaw = yb + (yc-yb)*((t-ta-tb-tturn)/tturn)
+        elif t-ta-tb-2*tturn < tc: # Third leg
+            self.desx = x2 + (x1-x2)*((t-ta-tb-2*tturn)/tc)
+            self.desvx = (x1-x2)/tc
+            self.desy = y2
+            self.desvy = 0.0
+            yaw = yc
+        elif t-ta-tb-tc-2*tturn < tturn: # Third turn
+            self.desx = x1
+            self.desvx = 0.0
+            self.desy = y2
+            self.desvy = 0.0
+            yaw = yc + (yd-yc)*((t-ta-tb-tc-2*tturn)/tturn)
+        elif t-ta-tb-tc-3*tturn < td: # Fourth leg
+            self.desx = x1
+            self.desvx = 0.0
+            self.desy = y2 + (y1-y2)*((t-ta-tb-tc-3*tturn)/td)
+            self.desvy = (y1-y2)/td
+            yaw = yd
+        else: # Fourth turn
+            self.desx = x1
+            self.desvx = 0.0
+            self.desy = y1
+            self.desvy = 0.0
+            yaw = yd + (ya-yd)*((t-per+tturn)/tturn)
+        #print(self.desx, self.desy, yaw) 
+        #print(self.desvx,self.desvy)
+        #''' # end Rectuangular path
 
         # CONTROLLERS ---------------------------
         # Raibert controller
