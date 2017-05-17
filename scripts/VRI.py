@@ -82,6 +82,7 @@ n_steps = len(step_list)
 
 class VRI:
     def __init__(self):
+        self.euler = np.array([0,0,1.5])
         self.pos = np.array([0,0,0])
         self.vel = np.array([0,0,0])
         self.acc = np.array([0,0,0])
@@ -110,18 +111,19 @@ class VRI:
         self.desvx = 0.0
         self.desy = 0.0
         self.desvy = 0.0
+        self.desyaw = 0.0
         self.startTime = time.time()
 
         # Motor gains format:
         #  [ Kp , Ki , Kd , Kaw , Kff     ,  Kp , Ki , Kd , Kaw , Kff ]
         #    ----------LEFT----------        ---------_RIGHT----------
-        motorgains = [80,0,30,0,0,0,0,0,0,0]
-        thrustgains = [80,0,110,60,0,110]
+        motorgains = [160,0,30,0,0,0,0,0,0,0]
+        thrustgains = [120,0,120,120,0,150]
         # roll kp, ki, kd; yaw kp, ki, kd
 
-        duration = 5000
+        duration = 8000
         rightFreq = thrustgains # thruster gains
-        leftFreq = [0.16, 0.2, 0.5, .16, 0.12, 0.25] # Raibert-like gains
+        #leftFreq = [0.16, 0.2, 0.5, .16, 0.12, 0.25] # Raibert-like gains
         #           xv xp xsat yv yp ysat
         phase =  [67, 80] # Raibert leg extension
         #       retract extend
@@ -129,7 +131,7 @@ class VRI:
         repeat = False
 
         # Gains for actual Raibert controller
-        leftFreq = [2, 0.01, 1.5, 2, 0.01, 0.75]
+        leftFreq = [2, 0.011, 1.5, 2, 0.011, 0.75]
         #           KPx  Kx  Vxmax  KPy  Ky  Vymax          
 
         self.manParams = manueverParams(0,0,0,0,0,0)
@@ -157,6 +159,12 @@ class VRI:
         
         # START EXPERIMENT
         raw_input("Press enter to start run ...")
+
+        if abs(self.euler[1]) > 0.5 or abs(self.euler[2]) > 0.5:
+            print "Robot starting position is incorrect."
+            self.MJ_state = 2
+            return
+
         startTelemetrySave(self.numSamples)
         exp = [2]
         stopSignal = [0]
@@ -218,13 +226,7 @@ class VRI:
         # Extract relevant robot coordinates
         pos = HR[0:3,3]
         euler_temp = euler_from_matrix(HR, axes='rzxy')
-        euler = [euler_temp[0], euler_temp[1], euler_temp[2]]
-        '''
-        euler[2] = euler[2] - 3.14159265/2
-        if euler[2] < - 3.14159265:
-            euler[2] = euler[2] + 3.14159265*2
-        '''
-        pit = euler[2]
+        self.euler = [euler_temp[0], euler_temp[1], euler_temp[2]]
 
         if self.unheard_flag == 0: # first message
             self.unheard_flag = 1
@@ -238,7 +240,7 @@ class VRI:
             self.acc = alpha_a*acc + (1-alpha_a)*self.acc
             #rospy.loginfo(rospy.get_caller_id() + ' ' + np.array_str(vel))
         
-        #print(np.hstack((self.vel, euler[0], euler[1], euler[2])))
+        #print(np.hstack((self.vel, self.euler[0], self.euler[1], self.euler[2])))
 
         # Sequence steps
         #   simple test: acceleration magnitude threshold for ground contact
@@ -344,43 +346,46 @@ class VRI:
             self.params.phase[1] = 80
         ''' # end Vertical variation
 
-        yaw = 0.0 #TODO: make this a parameter
+        self.desyaw = 0.0 #TODO: make this a parameter
         # Rotate in place
         yawVel = 0.5
         yawDwell = 3.0
         ''' # 1
         yawAmp = 2.0
         if (time.time()-self.startTime) < yawDwell:
-            yaw = 0.0
+            self.desyaw = 0.0
         elif (time.time()-self.startTime-yawDwell+yawAmp/yawVel) % (4.0*yawAmp/yawVel) < (2.0*yawAmp/yawVel):
-            yaw = yawVel*(time.time()-self.startTime-yawDwell+yawAmp/yawVel)%(2.0*yawAmp/yawVel) - yawAmp
+            self.desyaw = yawVel*(time.time()-self.startTime-yawDwell+yawAmp/yawVel)%(2.0*yawAmp/yawVel) - yawAmp
         else:
-            yaw = -yawVel*(time.time()-self.startTime-yawDwell+yawAmp/yawVel)%(2.0*yawAmp/yawVel) - yawAmp 
-        print(yaw)
+            self.desyaw = -yawVel*(time.time()-self.startTime-yawDwell+yawAmp/yawVel)%(2.0*yawAmp/yawVel) - yawAmp 
+        #print(self.desyaw)
         ''' # end Rotate in place 1
         ''' # 2
         if (time.time()-self.startTime) < yawDwell:
-            yaw = 0.0
+            self.desyaw = 0.0
         else:
-            yaw = (yawVel*(time.time()-self.startTime-yawDwell)+3.14159)%(2*3.14159) - 3.14159
+            self.desyaw = (yawVel*(time.time()-self.startTime-yawDwell)+3.14159)%(2*3.14159) - 3.14159
         ''' # end Rotate in place 2
 
         # Rectangular path
-        #'''
-        rectPathDwell = 3.0
+        '''
         x1 = 0.0 # [m] starting x
         y1 = -0.5 # [m] starting y
         x2 = 2.0 # [m] opposite corner x
         y2 = 0.5 # [m] opposite corner y
-        ta = 4.0 # [s] first leg time
-        tb = 4.0 # [s] second leg time
+
+        ta = 3.0 # [s] first leg time
+        tb = 2.0 # [s] second leg time
         tc = 2.0 # [s] third leg time
-        td = 2.0 # [s] fourth leg time
+        td = 1.5 # [s] fourth leg time
+
         ya = 0.0
-        yb = 3*3.14159/4
-        yc = 3.14159
-        yd = 3.14159/2
-        tturn = 3.0 # [s] turning time
+        yb = 3.14159/2
+        yc = 0.0
+        yd = -3.14159/2
+
+        tturn = 4.0 # [s] turning time
+        rectPathDwell = 3.0
         per = ta + tb + tc + td + 4*tturn
         t = (time.time()-self.startTime-rectPathDwell) % per
         if time.time()-self.startTime < rectPathDwell: # Dwell
@@ -388,58 +393,58 @@ class VRI:
             self.desy = y1
             self.desvx = 0.0
             self.desvy = 0.0
-            yaw = ya
+            self.desyaw = ya
         elif t < ta: # First leg
             self.desx = x1 + (x2-x1)*(t/ta)
             self.desvx = (x2-x1)/ta
             self.desy = y1
             self.desvy = 0.0
-            yaw = ya
+            self.desyaw = ya
         elif t-ta < tturn: # First Turn
             self.desx = x2
             self.desvx = 0.0
             self.desy = y1
             self.desvy = 0.0
-            yaw = ya + (yb-ya)*((t-ta)/tturn)
+            self.desyaw = ya + (yb-ya)*((t-ta)/tturn)
         elif t-ta-tturn < tb: # Second leg
             self.desx = x2
             self.desvx = 0.0
             self.desy = y1 + (y2-y1)*((t-ta-tturn)/tb)
             self.desvy = (y2-y1)/tb
-            yaw = yb
+            self.desyaw = yb
         elif t-ta-tb-tturn < tturn: # Second turn
             self.desx = x2
             self.desvx = 0.0
             self.desy = y2
             self.desvy = 0.0
-            yaw = yb + (yc-yb)*((t-ta-tb-tturn)/tturn)
+            self.desyaw = yb + (yc-yb)*((t-ta-tb-tturn)/tturn)
         elif t-ta-tb-2*tturn < tc: # Third leg
             self.desx = x2 + (x1-x2)*((t-ta-tb-2*tturn)/tc)
             self.desvx = (x1-x2)/tc
             self.desy = y2
             self.desvy = 0.0
-            yaw = yc
+            self.desyaw = yc
         elif t-ta-tb-tc-2*tturn < tturn: # Third turn
             self.desx = x1
             self.desvx = 0.0
             self.desy = y2
             self.desvy = 0.0
-            yaw = yc + (yd-yc)*((t-ta-tb-tc-2*tturn)/tturn)
+            self.desyaw = yc + (yd-yc)*((t-ta-tb-tc-2*tturn)/tturn)
         elif t-ta-tb-tc-3*tturn < td: # Fourth leg
             self.desx = x1
             self.desvx = 0.0
             self.desy = y2 + (y1-y2)*((t-ta-tb-tc-3*tturn)/td)
             self.desvy = (y1-y2)/td
-            yaw = yd
+            self.desyaw = yd
         else: # Fourth turn
             self.desx = x1
             self.desvx = 0.0
             self.desy = y1
             self.desvy = 0.0
-            yaw = yd + (ya-yd)*((t-per+tturn)/tturn)
-        #print(self.desx, self.desy, yaw) 
+            self.desyaw = yd + (ya-yd)*((t-per+tturn)/tturn)
+        #print(self.desx, self.desy, self.desyaw) 
         #print(self.desvx,self.desvy)
-        #''' # end Rectuangular path
+        ''' # end Rectuangular path
 
         # CONTROLLERS ---------------------------
         # Raibert controller
@@ -455,7 +460,7 @@ class VRI:
         L = 0.225   # leg length in meters
         KV = 1.0    # between 0 and 1
         # Desired velocities
-        RB = np.matrix([[np.cos(euler[0]),np.sin(euler[0])],[-np.sin(euler[0]),np.cos(euler[0])]])
+        RB = np.matrix([[np.cos(self.euler[0]),np.sin(self.euler[0])],[-np.sin(self.euler[0]),np.cos(self.euler[0])]])
         Berr = np.dot(RB,[[self.pos[0]-self.desx],[self.pos[1]-self.desy]])
         Bv = np.dot(RB,[[self.vel[0]],[self.vel[1]]])
         Bvdes = np.dot(RB,[[self.desvx],[self.desvy]])
@@ -481,23 +486,23 @@ class VRI:
         # Raibert-inspired controller
         '''
         ctrl = [-self.params.leftFreq[0]*(self.vel[0]-self.desvx) - self.params.leftFreq[1]*max(min(self.pos[0]-self.desx, self.params.leftFreq[2]),-self.params.leftFreq[2]), self.params.phase[0], self.params.phase[1]] # Simple controller
-        yaw = 0.0 #TODO: make this a parameter
+        self.desyaw = 0.0 #TODO: make this a parameter
         roll = self.params.leftFreq[3]*(self.vel[1]-self.desvy) + self.params.leftFreq[4]*max(min(self.pos[1]-self.desy,self.params.leftFreq[5]),-self.params.leftFreq[5])
 
         # Correct deflections for yaw deflections
-        roll_b = np.cos(euler[0])*roll + np.sin(euler[0])*ctrl[0]
-        pitch_b = np.cos(euler[0])*ctrl[0] - np.sin(euler[0])*roll
+        roll_b = np.cos(self.euler[0])*roll + np.sin(self.euler[0])*ctrl[0]
+        pitch_b = np.cos(self.euler[0])*ctrl[0] - np.sin(self.euler[0])*roll
         roll = roll_b
         ctrl[0] = pitch_b
         ''' # end Raibert-inspired controller
 
         # ROBOT COMMANDS --------------------------------------------
-        AngleScaling = 7334;#7334; # rad to 16b 2000deg/s integrated 1000Hz
-            # 180(deg)/pi(rad) * 2**16(ticks)/2000(deg/s) * 1000(Hz) = 1877468
-            # 1877467 / 2**8 = 7334
+        AngleScaling = 3667; # rad to 15b 2000deg/s integrated 1000Hz
+            # 180(deg)/pi(rad) * 2**15(ticks)/2000(deg/s) * 1000(Hz) = 938734.0515
+            # 938734.0515 / 2**8 = 3667
         LengthScaling = 256; # radians to 23.8 fixed pt radians
         CurrentScaling = 256; # radians to 23.8 fixed pt radians
-        ES = [int(euler[0]*AngleScaling),int(euler[1]*AngleScaling),int(euler[2]*AngleScaling)]
+        ES = [int(self.euler[0]*AngleScaling),int(self.euler[1]*AngleScaling),int(self.euler[2]*AngleScaling)]
 
         if np.isnan(ctrl[0]): # NaN check
             ctrl[0] = 0
@@ -507,7 +512,7 @@ class VRI:
             ctrl[2] = 65
 
         CS = [int(ctrl[0]*AngleScaling),int(ctrl[1]*LengthScaling),int(ctrl[2]*CurrentScaling)]
-        Cyaw = int(AngleScaling*yaw)
+        Cyaw = int(AngleScaling*self.desyaw)
         Croll = int(AngleScaling*roll)
         
         if self.MJ_state == 0:
@@ -533,7 +538,7 @@ class VRI:
             #print(self.step_ind,ctrl[0],ctrl[1],ctrl[2]) # Deadbeat
             #print(self.pos[0],self.pos[1],self.pos[2])
             print(Cyaw*57/AngleScaling,Croll*57/AngleScaling,CS[0]*57/AngleScaling)
-            #print(euler[0]*57,euler[1]*57,euler[2]*57)
+            #print(self.euler[0]*57,self.euler[1]*57,self.euler[2]*57)
             #print([ES[0], ES[1], ES[2], Cyaw, Croll, CS[0]])
             #print(Cyaw, Croll, CS[0], CS[1], CS[2]) # Commands
             #print(Croll,ctrl[0],ctrl[1],ctrl[2]) # cmds before scaling
