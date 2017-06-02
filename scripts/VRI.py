@@ -57,6 +57,9 @@ from hall_helpers import *
 
 EXIT_WAIT = False
 
+# Salto:
+salto_name = 1 # 1: Salto-1P original, 2: Salto-1P Rudolph
+
 # Parameters
 alpha_v = 0.5 # velocity first-order low-pass
 alpha_a = 0.1 # acceleration first-order low-pass
@@ -70,7 +73,10 @@ step_list = np.array([[1.0,0.0,4.0]])
 
 # Pre-processing
 off_mat = quaternion_matrix(rot_off)
-mis_mat = euler_matrix(-0.03, 0.04, -0.02, 'rxyz')
+if salto_name == 1:
+    mis_mat = euler_matrix(-0.03, 0.04, -0.02, 'rxyz')
+elif salto_name == 2:
+    mis_mat = euler_matrix(0,0,0,'rxyz')
 off_mat = np.dot(off_mat,mis_mat)
 off_mat[0:3,3] = pos_off
 
@@ -138,8 +144,10 @@ class VRI:
         setMotorGains(motorgains)
 
         rospy.init_node('VRI')
-        rospy.Subscriber('vicon/jumper/body', TransformStamped, self.callback)
-
+        if salto_name == 1:
+            rospy.Subscriber('vicon/jumper/body', TransformStamped, self.callback)
+        elif salto_name == 2:
+            rospy.Subscriber('vicon/Rudolph/body', TransformStamped, self.callback)
         s = rospy.Service('MJ_state_server',MJstate,self.handle_MJ_state)
 
         # Initiate telemetry recording; the robot will begin recording immediately when cmd is received.
@@ -366,20 +374,20 @@ class VRI:
         ''' # end Rotate in place 2
 
         # Rectangular path
-        #'''
+        '''
         rectPathDwell = 3.0
         x1 = 0.0 # [m] starting x
         y1 = -0.5 # [m] starting y
         x2 = 2.0 # [m] opposite corner x
         y2 = 0.5 # [m] opposite corner y
         ta = 4.0 # [s] first leg time
-        tb = 4.0 # [s] second leg time
+        tb = 2.0 # [s] second leg time
         tc = 2.0 # [s] third leg time
         td = 2.0 # [s] fourth leg time
         ya = 0.0
-        yb = 3*3.14159/4
+        yb = 3.14159/2
         yc = 3.14159
-        yd = 3.14159/2
+        yd = -3.14159/2
         tturn = 3.0 # [s] turning time
         per = ta + tb + tc + td + 4*tturn
         t = (time.time()-self.startTime-rectPathDwell) % per
@@ -439,7 +447,7 @@ class VRI:
             yaw = yd + (ya-yd)*((t-per+tturn)/tturn)
         #print(self.desx, self.desy, yaw) 
         #print(self.desvx,self.desvy)
-        #''' # end Rectuangular path
+        ''' # end Rectuangular path
 
         # CONTROLLERS ---------------------------
         # Raibert controller
