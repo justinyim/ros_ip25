@@ -58,16 +58,18 @@ from hall_helpers import *
 EXIT_WAIT = False
 
 # Salto:
-salto_name = 1 # 1: Salto-1P original, 2: Salto-1P Rudolph
+salto_name = 2 # 1: Salto-1P Santa, 2: Salto-1P Rudolph
 
 # Parameters
 alpha_v = 0.5 # velocity first-order low-pass
 alpha_a = 0.1 # acceleration first-order low-pass
-dt = 0.01 # Vicon frame time step
+dt = 0.01 #(1.0/300.0) # Vicon frame time step
 rot_off = quaternion_about_axis(2.094,(1,1,-1)) # robot rotation from Vicon body frame
 pos_off = [0.0165,0.07531,-0.04] # coords of the robot origin in the Vicon body frame
 #[0.00587, 0.0165, -0.07531]
 #[0.0165,0.07531,-0.00587]
+
+decimate_factor = 1
 
 step_list = np.array([[1.0,0.0,4.0]])
 
@@ -76,7 +78,7 @@ off_mat = quaternion_matrix(rot_off)
 if salto_name == 1:
     mis_mat = euler_matrix(-0.03, 0.04, -0.02, 'rxyz')
 elif salto_name == 2:
-    mis_mat = euler_matrix(0,0,0,'rxyz')
+    mis_mat = euler_matrix(0,-0.02,0,'rxyz')
 off_mat = np.dot(off_mat,mis_mat)
 off_mat[0:3,3] = pos_off
 
@@ -94,6 +96,8 @@ class VRI:
         self.step_ind = 0
         self.last_step = time.time()
         self.telemetry_read = 0
+
+        self.decimate_count = 0
 
         self.unheard_flag = 0
         self.xbee_sending = 1
@@ -129,13 +133,13 @@ class VRI:
         rightFreq = thrustgains # thruster gains
         leftFreq = [0.16, 0.2, 0.5, .16, 0.12, 0.25] # Raibert-like gains
         #           xv xp xsat yv yp ysat
-        phase =  [67, 80] # Raibert leg extension
+        phase = [65, 78] # Raibert leg extension
         #       retract extend
         telemetry = True
         repeat = False
 
         # Gains for actual Raibert controller
-        leftFreq = [2, 0.01, 1.5, 2, 0.01, 0.75]
+        leftFreq = [2, 0.008, 1.5, 2, 0.008, 0.75]
         #           KPx  Kx  Vxmax  KPy  Ky  Vymax          
 
         self.manParams = manueverParams(0,0,0,0,0,0)
@@ -145,9 +149,11 @@ class VRI:
 
         rospy.init_node('VRI')
         if salto_name == 1:
-            rospy.Subscriber('vicon/jumper/body', TransformStamped, self.callback)
+            rospy.Subscriber('vicon/jumper1/jumper1', TransformStamped, self.callback)
+            #rospy.Subscriber('vicon/jumper/body', TransformStamped, self.callback)
         elif salto_name == 2:
-            rospy.Subscriber('vicon/Rudolph/body', TransformStamped, self.callback)
+            rospy.Subscriber('vicon/jumper2/jumper2', TransformStamped, self.callback)
+            #rospy.Subscriber('vicon/Rudolph/body', TransformStamped, self.callback)
         s = rospy.Service('MJ_state_server',MJstate,self.handle_MJ_state)
 
         # Initiate telemetry recording; the robot will begin recording immediately when cmd is received.
@@ -211,6 +217,12 @@ class VRI:
         return 0
 
     def callback(self, data):
+        self.decimate_count += 1
+        if self.decimate_count == decimate_factor:
+            self.decimate_count = 0
+        else:
+            return
+
         # VICON DATA ------------------------------------------------
         # Extract transform from message
         rot = data.transform.rotation
@@ -374,21 +386,21 @@ class VRI:
         ''' # end Rotate in place 2
 
         # Rectangular path
-        '''
+        #'''
         rectPathDwell = 3.0
-        x1 = 0.0 # [m] starting x
-        y1 = -0.5 # [m] starting y
+        x1 = -2.0 # [m] starting x
+        y1 = -1.0 # [m] starting y
         x2 = 2.0 # [m] opposite corner x
-        y2 = 0.5 # [m] opposite corner y
-        ta = 4.0 # [s] first leg time
-        tb = 2.0 # [s] second leg time
-        tc = 2.0 # [s] third leg time
-        td = 2.0 # [s] fourth leg time
+        y2 = 1.0 # [m] opposite corner y
+        ta = 8.0 # [s] first leg time
+        tb = 3.0 # [s] second leg time
+        tc = 4.0 # [s] third leg time
+        td = 4.0 # [s] fourth leg time
         ya = 0.0
         yb = 3.14159/2
         yc = 3.14159
-        yd = -3.14159/2
-        tturn = 3.0 # [s] turning time
+        yd = 3.14159/2
+        tturn = 4.0 # [s] turning time
         per = ta + tb + tc + td + 4*tturn
         t = (time.time()-self.startTime-rectPathDwell) % per
         if time.time()-self.startTime < rectPathDwell: # Dwell
@@ -447,7 +459,7 @@ class VRI:
             yaw = yd + (ya-yd)*((t-per+tturn)/tturn)
         #print(self.desx, self.desy, yaw) 
         #print(self.desvx,self.desvy)
-        ''' # end Rectuangular path
+        #''' # end Rectuangular path
 
         # CONTROLLERS ---------------------------
         # Raibert controller
