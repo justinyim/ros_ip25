@@ -1,37 +1,4 @@
 #!/usr/bin/env python
-# Software License Agreement (BSD License)
-#
-# Copyright (c) 2008, Willow Garage, Inc.
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-#
-#  * Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#  * Redistributions in binary form must reproduce the above
-#    copyright notice, this list of conditions and the following
-#    disclaimer in the documentation and/or other materials provided
-#    with the distribution.
-#  * Neither the name of Willow Garage, Inc. nor the names of its
-#    contributors may be used to endorse or promote products derived
-#    from this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.
-#
-# Revision $Id$
 
 import rospy
 from geometry_msgs.msg import TransformStamped
@@ -54,11 +21,12 @@ import shared_multi as shared # note this is local to this machine
 from velociroach import *
 
 from hall_helpers import *
+import salto_config
 
 EXIT_WAIT = False
 
 # Salto:
-salto_name = 2 # 1: Salto-1P Santa, 2: Salto-1P Rudolph
+salto_name = 2 # 1: Salto-1P Santa, 2: Salto-1P Rudolph, 3: Salto-1P Dasher
 
 # Parameters
 alpha_v = 0.5 # velocity first-order low-pass
@@ -76,9 +44,11 @@ step_list = np.array([[1.0,0.0,4.0]])
 # Pre-processing
 off_mat = quaternion_matrix(rot_off)
 if salto_name == 1:
-    mis_mat = euler_matrix(-0.03, 0.04, -0.02, 'rxyz')
+    mis_mat = salto_config.offsets1
 elif salto_name == 2:
-    mis_mat = euler_matrix(0,-0.02,0,'rxyz')
+    mis_mat = salto_config.offsets2
+elif salto_name == 3:
+    mis_mat = salto_config.offsets3
 off_mat = np.dot(off_mat,mis_mat)
 off_mat[0:3,3] = pos_off
 
@@ -90,21 +60,25 @@ n_steps = len(step_list)
 
 class VRI:
     def __init__(self):
+        # Robot position variables
         self.pos = np.array([0,0,0])
         self.vel = np.array([0,0,0])
         self.acc = np.array([0,0,0])
+        self.euler = np.array([0,0,0])
         self.step_ind = 0
         self.last_step = time.time()
-        self.telemetry_read = 0
 
+        # Flags and counters
         self.decimate_count = 0
-
+        self.telemetry_read = 0
         self.unheard_flag = 0
         self.xbee_sending = 1
         self.MJ_state = 0 # 0: run, 1: stand, 2: stop
 
+        # ROS
         self.tf_pub = tf.TransformBroadcaster()
 
+        # Control logs
         self.ctrl_pub_rol = rospy.Publisher('control/rol',Float32)
         self.ctrl_pub_pit = rospy.Publisher('control/pit',Float32)
         self.ctrl_pub_yaw = rospy.Publisher('control/yaw',Float32)
@@ -112,34 +86,43 @@ class VRI:
         self.ctrl_pub_ext = rospy.Publisher('control/ext',Float32)
         self.ctrl_pub_flag = rospy.Publisher('control/flag',Float32)
 
-        setupSerial()
-        queryRobot()
-        
-        # In-place
-        self.desx = 0.5
+        # Raibert Controller
+        # Robot setpoint variables
+        self.desx = 0.0
         self.desvx = 0.0
         self.desy = 0.0
         self.desvy = 0.0
+        self.desax = 0.0
+        self.desay = 0.0
+        self.desyaw = 0.0
         self.startTime = time.time()
+        
+        self.ind = 0
+        self.wpT = 0
 
-        # Motor gains format:
+        # SETUP -----------------------
+        setupSerial()
+        queryRobot()
+
+                # Motor gains format:
         #  [ Kp , Ki , Kd , Kaw , Kff     ,  Kp , Ki , Kd , Kaw , Kff ]
         #    ----------LEFT----------        ---------_RIGHT----------
-        motorgains = [80,0,30,0,0,0,0,0,0,0]
-        thrustgains = [80,0,110,60,0,110]
+        motorgains = [160,0,30,0,0,0,0,0,0,0]
+        thrustgains = [160,0,110,160,0,110]
         # roll kp, ki, kd; yaw kp, ki, kd
 
         duration = 5000
         rightFreq = thrustgains # thruster gains
         leftFreq = [0.16, 0.2, 0.5, .16, 0.12, 0.25] # Raibert-like gains
         #           xv xp xsat yv yp ysat
-        phase = [65, 78] # Raibert leg extension
+        phase = [60, 85] # Raibert leg extension
         #       retract extend
         telemetry = True
         repeat = False
 
         # Gains for actual Raibert controller
-        leftFreq = [2, 0.008, 1.5, 2, 0.008, 0.75]
+        #leftFreq = [2, 0.008, 1.5, 2, 0.008, 0.75]
+        leftFreq = [2, 0.008, 2.0, 2, 0.008, 1.0]
         #           KPx  Kx  Vxmax  KPy  Ky  Vymax          
 
         self.manParams = manueverParams(0,0,0,0,0,0)
@@ -147,13 +130,18 @@ class VRI:
         xb_send(0, command.SET_THRUST_OPEN_LOOP, pack('6h',*thrustgains))
         setMotorGains(motorgains)
 
+
+        # BEGIN -----------------------
         rospy.init_node('VRI')
         if salto_name == 1:
-            rospy.Subscriber('vicon/jumper1/jumper1', TransformStamped, self.callback)
-            #rospy.Subscriber('vicon/jumper/body', TransformStamped, self.callback)
+            #rospy.Subscriber('vicon/jumper1/jumper1', TransformStamped, self.callback)
+            rospy.Subscriber('vicon/jumper/body', TransformStamped, self.callback)
         elif salto_name == 2:
-            rospy.Subscriber('vicon/jumper2/jumper2', TransformStamped, self.callback)
-            #rospy.Subscriber('vicon/Rudolph/body', TransformStamped, self.callback)
+            #rospy.Subscriber('vicon/jumper2/jumper2', TransformStamped, self.callback)
+            rospy.Subscriber('vicon/Rudolph/body', TransformStamped, self.callback)
+        elif salto_name == 3:
+            #rospy.Subscriber('vicon/jumper3/jumper3', TransformStamped, self.callback)
+            rospy.Subscriber('vicon/Dasher/body', TransformStamped, self.callback)
         s = rospy.Service('MJ_state_server',MJstate,self.handle_MJ_state)
 
         # Initiate telemetry recording; the robot will begin recording immediately when cmd is received.
@@ -179,6 +167,8 @@ class VRI:
         xb_send(0, command.START_EXPERIMENT, pack('h', *exp))
         
         self.startTime = time.time()
+        self.wpT = 0
+        self.ind = 0
         self.step_ind = 0
         self.last_step = self.startTime
 
@@ -192,6 +182,7 @@ class VRI:
         #rospy.spin()
 
     def handle_MJ_state(self, data):
+        # Handle ROS service
         print "RECEIVED " + str(data.a)
 
         if data.a == 1:
@@ -202,6 +193,7 @@ class VRI:
                 rospy.sleep(0.001)
             stopSignal = [0]
             xb_send(0, command.STOP_EXPERIMENT, pack('h', *stopSignal))
+
             self.MJ_state = 2
         elif data.a == 3:
             if self.MJ_state != 2:
@@ -217,6 +209,7 @@ class VRI:
         return 0
 
     def callback(self, data):
+        # Process Vicon data and send commands
         self.decimate_count += 1
         if self.decimate_count == decimate_factor:
             self.decimate_count = 0
@@ -239,12 +232,11 @@ class VRI:
         pos = HR[0:3,3]
         euler_temp = euler_from_matrix(HR, axes='rzxy')
         euler = [euler_temp[0], euler_temp[1], euler_temp[2]]
-        '''
-        euler[2] = euler[2] - 3.14159265/2
-        if euler[2] < - 3.14159265:
-            euler[2] = euler[2] + 3.14159265*2
-        '''
-        pit = euler[2]
+        self.euler = euler
+
+        if abs(self.euler[1]) > math.pi/4 or abs(self.euler[2]) > math.pi/4:
+            print("Bad tracking!")
+            return
 
         if self.unheard_flag == 0: # first message
             self.unheard_flag = 1
@@ -267,6 +259,165 @@ class VRI:
                 self.step_ind += 1
             self.last_step = time.time()
 
+        # HOPPING ---------------------------------------------------
+        # ctrl = self.Deadbeat()
+
+        waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 65, 80, 3.0, 0]]) # in place
+        '''
+        waypts = np.array([ # circle (Dasher)
+            [0.0, 0.0, 0.0,         0.0, 0.0,  65, 80, 5.0, 1], # loop
+            [0.5, 0.0, 0.0,         0.0, 0.3,  60, 80, 3.0, 0],
+            [0.0, 0.5, math.pi/2,   -0.3, 0.0, 60, 80, 3.0, 0],
+            [-0.5, 0.0, math.pi,    0.0, -0.3, 60, 80, 3.0, 0],
+            [0.0, -0.5, -math.pi/2, 0.3, 0.0,  60, 80, 3.0, 0]])
+        '''
+        '''
+        waypts = np.array([ # figure 8 (Rudolph)
+            [0.0, 0.0, 0.0,         0.0, 0.0,  68, 80, 3.0, 1], # loop
+            [0.6, 0.0, 0.0,         0.0, 0.5,  65, 80, 2.0, 0],
+            [0.0, 0.6, 0.0,         -0.5, 0.0, 65, 80, 2.0, 0],
+            [-0.6, 0.0, 0.0,        0.0, -0.5, 65, 80, 2.0, 0],
+            [0.0, -0.6, math.pi/2,  0.5, 0.0,  65, 80, 2.0, 0],
+            [0.6, 0.0, math.pi,     0.0, 0.5,  65, 80, 2.0, 0],
+            [1.2, 0.6, math.pi,     -0.5, 0.0, 65, 80, 2.0, 0],
+            [1.8, 0.0, math.pi,     0.0, -0.5, 65, 80, 2.0, 0],
+            [1.2, -0.6, math.pi/2,  0.5, 0.0,  65, 80, 2.0, 0]])
+        '''
+        #'''
+        if salto_name == 3:
+            waypts = np.array([ # obstacles (Dasher)
+                [-0.3, -0.3, 0.0,       0.0, 0.0, 65, 80, 5.0, 0], # don't loop
+                [0.5, -0.3, 0.0,        0.0, 0.0, 60, 80, 2.0, 0], # onto foam
+                [0.5, -0.3, 0.0,        0.0, 0.0, 60, 85, 5.0, 0], # stay on foam
+                [-1.0, -0.3, 0.0,       0.0, 0.0, 60, 80, 4.0, 0], # go back
+                [1.0, -0.3, 0.0,        0.0, 0.0, 60, 85, 2.0, 0], # go fast
+                [1.0, -0.3, 0.0,        0.0, 0.0, 60, 80, 4.0, 0], # stabilize
+                [1.5, 0.0, math.pi/6,   0.0, 0.0, 60, 85, 3.0, 0], # onto ramp
+                [1.5, 0.4, -math.pi/6,  0.0, 0.0, 60, 80, 3.0, 0], # stay on ramp
+                [1.5, 0.7, 0.0,         0.0, 0.0, 65, 80, 5.0, 0], # down the ramp
+                [1.0, 0.7, 0.0,         0.0, 0.0, 60, 80, 5.0, 0], # stabilize
+                [0.3, 0.7, 0.0,         0.7, 0.0, 60, 85, 1.0, 1], # onto table
+                [0.3, 0.7, 0.0,         0.0, 0.0, 60, 80, 5.0, 0], # stay on table
+                [-0.3, 0.7, 0.0,        0.0, 0.0, 60, 80, 2.0, 0], # off the table
+                [-0.3, 0.7, -math.pi/2, 0.0, 0.0, 60, 80, 4.0, 0], # turn corner
+                [-0.3, -0.3, -math.pi/2,0.0, 0.0, 60, 80, 2.0, 0], # return to start
+                [-0.3, -0.3, 0.0,       0.0, 0.0, 60, 80, 4.0, 0],
+                [-0.3, -0.3, 0.0,       0.0, 0.0, 65, 80, 3.0, 0]]) # slow down
+        elif salto_name == 2:
+            waypts = np.array([ # obstacles (Rudolph)
+                [-0.3, -0.3, 0.0,       0.0, 0.0, 67, 80, 5.0, 0], # don't loop
+                [0.5, -0.3, 0.0,        0.0, 0.0, 63, 80, 2.0, 0], # onto foam
+                [0.5, -0.3, 0.0,        0.0, 0.0, 60, 85, 5.0, 0], # stay on foam
+                [-1.0, -0.3, 0.0,       0.0, 0.0, 63, 80, 3.0, 0], # go back
+                [1.0, -0.3, 0.0,        0.0, 0.0, 60, 85, 2.0, 0], # go fast
+                [1.0, -0.3, 0.0,        0.0, 0.0, 63, 80, 4.0, 0], # stabilize
+                [1.5, 0.0, math.pi/6,   0.0, 0.0, 60, 85, 3.0, 0], # onto ramp
+                [1.5, 0.4, -math.pi/6,  0.0, 0.0, 63, 80, 3.0, 0], # stay on ramp
+                [1.5, 0.7, 0.0,         0.0, 0.0, 67, 80, 5.0, 0], # down the ramp
+                [1.0, 0.7, 0.0,         0.0, 0.0, 63, 80, 5.0, 0], # stabilize
+                [0.3, 0.7, 0.0,         0.7, 0.0, 60, 85, 1.0, 1], # onto table
+                [0.3, 0.7, 0.0,         0.0, 0.0, 63, 80, 5.0, 0], # stay on table
+                [-0.3, 0.7, 0.0,        0.0, 0.0, 63, 80, 2.0, 0], # off the table
+                [-0.3, 0.7, -math.pi/2, 0.0, 0.0, 63, 80, 4.0, 0], # turn corner
+                [-0.3, -0.3, -math.pi/2,0.0, 0.0, 63, 80, 2.0, 0], # return to start
+                [-0.3, -0.3, 0.0,       0.0, 0.0, 63, 80, 4.0, 0],
+                [-0.3, -0.3, 0.0,       0.0, 0.0, 67, 80, 3.0, 0]]) # slow down
+        #'''
+        self.Waypoints(waypts)
+        #self.Trajectory('Rectangle')
+        ctrl = self.Raibert()
+        # self.RaibertInspired()
+
+        # ROBOT COMMANDS --------------------------------------------
+        AngleScaling = 3667; # rad to 15b 2000deg/s integrated 1000Hz
+            # 180(deg)/pi(rad) * 2**15(ticks)/2000(deg/s) * 1000(Hz) = 938734
+            # 938734 / 2**8 = 3667
+        LengthScaling = 256; # radians to 23.8 fixed pt radians
+        CurrentScaling = 256; # radians to 23.8 fixed pt radians
+        ES = [int(euler[0]*AngleScaling),int(euler[1]*AngleScaling),int(euler[2]*AngleScaling)]
+
+        if np.isnan(ctrl[0]): # NaN check
+            ctrl[0] = 0
+        if np.isnan(ctrl[1]):
+            ctrl[1] = 0
+        if np.isnan(ctrl[2]):
+            ctrl[2] = 65
+        if np.isnan(ctrl[3]):
+            ctrl[3] = 65
+
+        CS = [int(ctrl[1]*AngleScaling),int(ctrl[2]*LengthScaling),int(ctrl[3]*CurrentScaling)]
+        Cyaw = int(AngleScaling*self.desyaw)
+        Croll = int(AngleScaling*ctrl[0])
+
+        if self.MJ_state == 0:
+            self.xbee_sending = 1
+
+            '''
+            rot_rol = quaternion_about_axis(Croll/AngleScaling,(1,1,-1))
+            mat_rol = quaternion_matrix()
+            rot_pit = quaternion_about_axis()
+            mat_pit = quaternion_matrix()
+            '''
+
+            toSend = [ES[0], ES[1], ES[2], Cyaw, Croll, CS[0], CS[1], CS[2]]
+            for i in range(8):
+                if toSend[i] > 32767:
+                    toSend[i] = 32767
+                elif toSend[i] < -32767:
+                    toSend[i] = -32767
+            xb_send(0, command.INTEGRATED_VICON, pack('8h',*toSend))
+            self.xbee_sending = 0
+
+            # Printing
+            #print(self.step_ind,ctrl[1],ctrl[2],ctrl[3]) # Deadbeat
+            #print(self.pos[0],self.pos[1],self.pos[2])
+            print(Cyaw*57/AngleScaling,Croll*57/AngleScaling,CS[0]*57/AngleScaling)
+            #print(euler[0]*57,euler[1]*57,euler[2]*57)
+            #print([ES[0], ES[1], ES[2], Cyaw, Croll, CS[0]])
+            #print(Cyaw, Croll, CS[0], CS[1], CS[2]) # Commands
+            #print(Croll,ctrl[1],ctrl[2],ctrl[3]) # cmds before scaling
+            #print(np.hstack((ctrl.T, [self.acc])))
+            #print(self.desx, self.desvx) # Raibert position
+            #print(57*ES[0]/AngleScaling, 57*ES[1]/AngleScaling, 57*ES[2]/AngleScaling)
+            #print "pos: %3.2f %3.2f %3.2f \tvel: %3.2f %3.2f \tacc: %3.2f %3.2f" % (self.desx, self.desy, self.desyaw, self.desvx, self.desvy, self.desax, self.desay)
+
+            # Publish commands
+            self.ctrl_pub_rol.publish(Croll)
+            self.ctrl_pub_pit.publish(CS[0])
+            self.ctrl_pub_yaw.publish(Cyaw)
+            self.ctrl_pub_ret.publish(CS[1])
+            self.ctrl_pub_ext.publish(CS[2])
+
+        elif self.MJ_state == 1:
+            self.xbee_sending = 1
+            toSend = [ES[0], ES[1], ES[2], Cyaw, int(0), int(0), int(70*256), int(70*256)]
+            xb_send(0, command.INTEGRATED_VICON, pack('8h',*toSend))
+            self.xbee_sending = 0
+        elif self.MJ_state == 2:
+            rospy.sleep(0.001)
+            #stopSignal = [0]
+            #xb_send(0, command.STOP_EXPERIMENT, pack('h', *stopSignal))
+        elif self.MJ_state == 3:
+            rospy.sleep(0.001)
+            #if self.telemetry_read == 0:
+            #    flashReadback(self.numSamples, self.params, self.manParams)
+            #    self.telemetry_read = 1
+
+
+        t = data.header.stamp.to_sec()
+        x = np.array([data.transform.rotation.x,data.transform.rotation.y,data.transform.rotation.z,data.transform.rotation.w, data.transform.translation.x,data.transform.translation.y,data.transform.translation.z,t])
+        self.tf_pub.sendTransform((x[4], x[5], x[6]), (x[0], x[1], x[2], x[3]), rospy.Time.now(), "jumper", "world")
+
+        '''
+        self.step_ind += 1
+        if self.step_ind > 100:
+            self.step_ind = 0
+
+        self.R1.setServo(-self.step_ind*0.005-0.4)
+        '''
+
+    '''
+    def Deadbeat(self):
         # DEADBEAT CONTROLLER ---------------------------------------
         # Calculate desired takeoff velocity
         #   foot planning
@@ -323,278 +474,333 @@ class VRI:
             ctrl[1] = -75
             ctrl[2] = -75
 
+        return np.concatenate(([0],ctrl),1)
+    '''
+
+    '''
+    def Trajectory(self, traj_name):
         # RAIBERT-INSPIRED SIMPLE HOPPING ---------------------------
         # TRAJECTORIES --------------------------
         # Forwards-backwards
-        '''
-        FBvel = 1.0/2.0
-        FBslowdown = 1 # factor to reduce commanded velocity
-        startDwell = 3.0
-        offset = 0.0
-        yscale = 0.1
-        endPt = 2
-        if (time.time()-self.startTime) < startDwell:
-            self.desx = offset
-            self.desvx = 0.0
+        if traj_name == 'Forwards-Backwards':
 
-            self.desy = -yscale*endPt/2.0
-            self.desvy = 0.0
-        elif (time.time()-self.startTime-startDwell) % (2.0*endPt/FBvel) > (endPt/FBvel): # backwards
-            self.desx = endPt - FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) + offset
-            self.desvx = -FBvel*FBslowdown
-            self.desy = yscale*(endPt - FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) - endPt/2.0)
-            self.desvy = yscale*self.desvx
-        else: # forwards
-            self.desx = FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) + offset
-            self.desvx = FBvel*FBslowdown
-            self.desy = yscale*(FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) - endPt/2.0)
-            self.desvy = yscale*self.desvx
-        #print(self.desx,self.desvx,self.desy,self.desvy)
-        ''' # end Forwards-backwards
+            FBvel = 1.0/2.0
+            FBslowdown = 1 # factor to reduce commanded velocity
+            startDwell = 3.0
+            offset = 0
+            yoffset = 0
+            yscale = 0.0
+            endPt = 1.5
+            if (time.time()-self.startTime) < startDwell:
+                self.desx = offset
+                self.desvx = 0.0
+
+                self.desy = -yscale*endPt/2.0 + yoffset
+                self.desvy = 0.0
+            elif (time.time()-self.startTime-startDwell) % (2.0*endPt/FBvel) > (endPt/FBvel): # backwards
+                self.desx = endPt - FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) + offset
+                self.desvx = -FBvel*FBslowdown
+                self.desy = yscale*(endPt - FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) - endPt/2.0) + yoffset
+                self.desvy = yscale*self.desvx
+            else: # forwards
+                self.desx = FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) + offset
+                self.desvx = FBvel*FBslowdown
+                self.desy = yscale*(FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) - endPt/2.0) + yoffset
+                self.desvy = yscale*self.desvx
+            #print(self.desx,self.desvx,self.desy,self.desvy)
+            # end Forwards-backwards
         
-        # Vertical variation
-        '''
-        if (time.time()-self.startTime) % 12.0 > 9.0:
-            self.params.phase[1] = 70
-        elif (time.time()-self.startTime) % 12.0 > 6.0:
-            self.params.phase[1] = 80
-        elif (time.time()-self.startTime) % 12.0 > 3.0:
-            self.params.phase[1] = 75
-        else:
-            self.params.phase[1] = 80
-        ''' # end Vertical variation
+        elif traj_name == 'Vertical Variation':
+            # Vertical variation
+            if (time.time()-self.startTime) % 12.0 > 9.0:
+                self.params.phase[1] = 70
+            elif (time.time()-self.startTime) % 12.0 > 6.0:
+                self.params.phase[1] = 80
+            elif (time.time()-self.startTime) % 12.0 > 3.0:
+                self.params.phase[1] = 75
+            else:
+                self.params.phase[1] = 80
+            # end Vertical variation
 
-        yaw = 0.0 #TODO: make this a parameter
-        # Rotate in place
-        yawVel = 0.5
-        yawDwell = 3.0
-        ''' # 1
-        yawAmp = 2.0
-        if (time.time()-self.startTime) < yawDwell:
-            yaw = 0.0
-        elif (time.time()-self.startTime-yawDwell+yawAmp/yawVel) % (4.0*yawAmp/yawVel) < (2.0*yawAmp/yawVel):
-            yaw = yawVel*(time.time()-self.startTime-yawDwell+yawAmp/yawVel)%(2.0*yawAmp/yawVel) - yawAmp
-        else:
-            yaw = -yawVel*(time.time()-self.startTime-yawDwell+yawAmp/yawVel)%(2.0*yawAmp/yawVel) - yawAmp 
-        print(yaw)
-        ''' # end Rotate in place 1
-        ''' # 2
-        if (time.time()-self.startTime) < yawDwell:
-            yaw = 0.0
-        else:
-            yaw = (yawVel*(time.time()-self.startTime-yawDwell)+3.14159)%(2*3.14159) - 3.14159
-        ''' # end Rotate in place 2
+        elif traj_name == 'Yaw Sweep':
+            yawVel = 0.5
+            yawDwell = 3.0
 
-        # Rectangular path
-        #'''
-        rectPathDwell = 3.0
-        x1 = -2.0 # [m] starting x
-        y1 = -1.0 # [m] starting y
-        x2 = 2.0 # [m] opposite corner x
-        y2 = 1.0 # [m] opposite corner y
-        ta = 8.0 # [s] first leg time
-        tb = 3.0 # [s] second leg time
-        tc = 4.0 # [s] third leg time
-        td = 4.0 # [s] fourth leg time
-        ya = 0.0
-        yb = 3.14159/2
-        yc = 3.14159
-        yd = 3.14159/2
-        tturn = 4.0 # [s] turning time
-        per = ta + tb + tc + td + 4*tturn
-        t = (time.time()-self.startTime-rectPathDwell) % per
-        if time.time()-self.startTime < rectPathDwell: # Dwell
-            self.desx = x1
-            self.desy = y1
-            self.desvx = 0.0
-            self.desvy = 0.0
-            yaw = ya
-        elif t < ta: # First leg
-            self.desx = x1 + (x2-x1)*(t/ta)
-            self.desvx = (x2-x1)/ta
-            self.desy = y1
-            self.desvy = 0.0
-            yaw = ya
-        elif t-ta < tturn: # First Turn
-            self.desx = x2
-            self.desvx = 0.0
-            self.desy = y1
-            self.desvy = 0.0
-            yaw = ya + (yb-ya)*((t-ta)/tturn)
-        elif t-ta-tturn < tb: # Second leg
-            self.desx = x2
-            self.desvx = 0.0
-            self.desy = y1 + (y2-y1)*((t-ta-tturn)/tb)
-            self.desvy = (y2-y1)/tb
-            yaw = yb
-        elif t-ta-tb-tturn < tturn: # Second turn
-            self.desx = x2
-            self.desvx = 0.0
-            self.desy = y2
-            self.desvy = 0.0
-            yaw = yb + (yc-yb)*((t-ta-tb-tturn)/tturn)
-        elif t-ta-tb-2*tturn < tc: # Third leg
-            self.desx = x2 + (x1-x2)*((t-ta-tb-2*tturn)/tc)
-            self.desvx = (x1-x2)/tc
-            self.desy = y2
-            self.desvy = 0.0
-            yaw = yc
-        elif t-ta-tb-tc-2*tturn < tturn: # Third turn
-            self.desx = x1
-            self.desvx = 0.0
-            self.desy = y2
-            self.desvy = 0.0
-            yaw = yc + (yd-yc)*((t-ta-tb-tc-2*tturn)/tturn)
-        elif t-ta-tb-tc-3*tturn < td: # Fourth leg
-            self.desx = x1
-            self.desvx = 0.0
-            self.desy = y2 + (y1-y2)*((t-ta-tb-tc-3*tturn)/td)
-            self.desvy = (y1-y2)/td
-            yaw = yd
-        else: # Fourth turn
-            self.desx = x1
-            self.desvx = 0.0
-            self.desy = y1
-            self.desvy = 0.0
-            yaw = yd + (ya-yd)*((t-per+tturn)/tturn)
-        #print(self.desx, self.desy, yaw) 
-        #print(self.desvx,self.desvy)
-        #''' # end Rectuangular path
+            yawAmp = 2.0
+            if (time.time()-self.startTime) < yawDwell:
+                self.desyaw = 0.0
+            elif (time.time()-self.startTime-yawDwell+yawAmp/yawVel) % (4.0*yawAmp/yawVel) < (2.0*yawAmp/yawVel):
+                self.desyaw = yawVel*(time.time()-self.startTime-yawDwell+yawAmp/yawVel)%(2.0*yawAmp/yawVel) - yawAmp
+            else:
+                self.desyaw = -yawVel*(time.time()-self.startTime-yawDwell+yawAmp/yawVel)%(2.0*yawAmp/yawVel) - yawAmp 
+            print(self.desyaw)
 
-        # CONTROLLERS ---------------------------
+        elif traj_name == 'Full Rotation':
+            yawVel = 0.5
+            yawDwell = 3.0
+
+            if (time.time()-self.startTime) < yawDwell:
+                self.desyaw = 0.0
+            else:
+                self.desyaw = (yawVel*(time.time()-self.startTime-yawDwell)+math.pi)%(2*math.pi) - math.pi
+
+        elif traj_name == 'Rectangle':
+            # Rectangular path
+            rectPathDwell = 3.0
+            x1 = -0.25 # [m] starting x
+            y1 = -0.25 # [m] starting y
+            x2 = 1.25 # [m] opposite corner x
+            y2 = 0.75 # [m] opposite corner y
+            ta = 4.0 # [s] first leg time
+            tb = 4.0 # [s] second leg time
+            tc = 4.0 # [s] third leg time
+            td = 3.0 # [s] fourth leg time
+            ya = 0.0
+            yb = 3*math.pi/2#math.pi/2
+            yc = 0.0#math.pi
+            yd = math.pi/2#3*math.pi/2
+            tturn = 3.0 # [s] turning time
+            per = ta + tb + tc + td + 4*tturn
+            t = (time.time()-self.startTime-rectPathDwell) % per
+            if time.time()-self.startTime < rectPathDwell: # Dwell
+                self.desx = x1
+                self.desy = y1
+                self.desvx = 0.0
+                self.desvy = 0.0
+                self.desyaw = ya
+            elif t < ta: # First leg
+                self.desx = x1 + (x2-x1)*(t/ta)
+                self.desvx = (x2-x1)/ta
+                self.desy = y1
+                self.desvy = 0.0
+                self.desyaw = ya
+            elif t-ta < tturn: # First Turn
+                self.desx = x2
+                self.desvx = 0.0
+                self.desy = y1
+                self.desvy = 0.0
+                if yb-ya > math.pi:
+                    self.desyaw = ya + (-2*math.pi+yb-ya)*((t-ta)/tturn)
+                elif yb-ya < -math.pi:
+                    self.desyaw = ya + (2*math.pi+yb-ya)*((t-ta)/tturn)
+                else:
+                    self.desyaw = ya + (yb-ya)*((t-ta)/tturn)
+            elif t-ta-tturn < tb: # Second leg
+                self.desx = x2
+                self.desvx = 0.0
+                self.desy = y1 + (y2-y1)*((t-ta-tturn)/tb)
+                self.desvy = (y2-y1)/tb
+                self.desyaw = yb
+            elif t-ta-tb-tturn < tturn: # Second turn
+                self.desx = x2
+                self.desvx = 0.0
+                self.desy = y2
+                self.desvy = 0.0
+                if yc-yb > math.pi:
+                    self.desyaw = yb + (-2*math.pi+yc-yb)*((t-ta-tb-tturn)/tturn)
+                elif yc-yb < -math.pi:
+                    self.desyaw = yb + (2*math.pi+yc-yb)*((t-ta-tb-tturn)/tturn)
+                else:
+                    self.desyaw = yb + (yc-yb)*((t-ta-tb-tturn)/tturn)
+            elif t-ta-tb-2*tturn < tc: # Third leg
+                self.desx = x2 + (x1-x2)*((t-ta-tb-2*tturn)/tc)
+                self.desvx = (x1-x2)/tc
+                self.desy = y2
+                self.desvy = 0.0
+                self.desyaw = yc
+            elif t-ta-tb-tc-2*tturn < tturn: # Third turn
+                self.desx = x1
+                self.desvx = 0.0
+                self.desy = y2
+                self.desvy = 0.0
+                if yd-yc > math.pi:
+                    self.desyaw = yc + (-2*math.pi+yd-yc)*((t-ta-tb-tc-2*tturn)/tturn)
+                elif yd-yc < -math.pi:
+                    self.desyaw = yc + (2*math.pi+yd-yc)*((t-ta-tb-tc-2*tturn)/tturn)
+                else:
+                    self.desyaw = yc + (yd-yc)*((t-ta-tb-tc-2*tturn)/tturn)
+            elif t-ta-tb-tc-3*tturn < td: # Fourth leg
+                self.desx = x1
+                self.desvx = 0.0
+                self.desy = y2 + (y1-y2)*((t-ta-tb-tc-3*tturn)/td)
+                self.desvy = (y1-y2)/td
+                self.desyaw = yd
+            else: # Fourth turn
+                self.desx = x1
+                self.desvx = 0.0
+                self.desy = y1
+                self.desvy = 0.0
+                if ya-yd > math.pi:
+                    self.desyaw = yd + (-2*math.pi+ya-yd)*((t-per+tturn)/tturn)
+                elif ya-yd < -math.pi:
+                    self.desyaw = yd + (2*math.pi+ya-yd)*((t-per+tturn)/tturn)
+                else:
+                    self.desyaw = yd + (ya-yd)*((t-per+tturn)/tturn)
+            #print(self.desx, self.desy, self.desyaw) 
+            #print(self.desvx,self.desvy)
+    '''
+
+    def Waypoints(self, pts):
+    	# pts: [x, y, psi, vx, vy, retract, extend, duration, options]
+        #   x and y are the waypoint coordinates in meters
+        #   psi is the yaw heading in radians
+        #   vx and vy are the velocities at x and y
+        #       ignored for the 1st waypoint (alway stationary) waypoint
+        #   retract and extend are the leg setpoints in motor radians
+        #   duration is the time for the leg that ends at x and y in seconds
+        #   options:
+        #       1st waypoint: 0: no loop, 1: loop
+        #       others: 0: normal waypoint, 1: constant velocity waypoint
+        
+
+        n_pts = pts.shape[0]
+        t = time.time()-self.startTime
+        
+        # Waypoint selection
+        if (self.ind == 0): # first point
+            dur = pts[0,7]
+            option = 0
+            ptx0 = pts[0,0:3]
+            ptv0 = np.array([0,0])
+            ptDx = np.array([0,0,0])
+            ptDv = np.array([0,0,0])
+            self.params.phase[0] = pts[self.ind,5]
+            self.params.phase[1] = pts[self.ind,6]
+        elif (self.ind == n_pts): # last point
+            if (pts[0,8] == 0 or n_pts <= 2): # no loop
+                self.desx = pts[n_pts-1,0]
+                self.desy = pts[n_pts-1,1]
+                self.desyaw = pts[n_pts-1,2]
+                self.desvx = 0.0
+                self.desvy = 0.0
+                self.desax = 0.0
+                self.desay = 0.0
+                self.params.phase[0] = pts[n_pts-1,5]
+                self.params.phase[1] = pts[n_pts-1,6]
+                return
+            else: # loop
+                dur = pts[1,7]
+                option = pts[1,8]
+                ptx0 = pts[n_pts-1,0:3]
+                ptv0 = pts[n_pts-1,3:5]
+                ptDx = pts[1,0:3] - pts[n_pts-1,0:3]
+                ptDv = pts[1,3:5] - pts[n_pts-1,3:5]
+                self.params.phase[0] = pts[1,5]
+                self.params.phase[1] = pts[1,6]
+        else: # intermediate point
+            dur = pts[self.ind,7]
+            option = pts[self.ind,8]
+            ptx0 = pts[self.ind-1,0:3]
+            ptv0 = pts[self.ind-1,3:5]
+            ptDx = pts[self.ind,0:3] - pts[self.ind-1,0:3]
+            ptDv = pts[self.ind,3:5] - pts[self.ind-1,3:5]
+            self.params.phase[0] = pts[self.ind,5]
+            self.params.phase[1] = pts[self.ind,6]
+        
+        # Yaw wrapping
+        while (ptDx[2] > math.pi):
+            ptDx[2] = ptDx[2] - 2*math.pi
+        while (ptDx[2] < -math.pi):
+            ptDx[2] = ptDx[2] + 2*math.pi
+
+        # Interpolation coefficients
+        # solution to:
+        # xf-x0 = a*tf**3 + b*tf**2 + v0*tf
+        # vf-v0 = 3*a*tf**2 + 2*b*tf
+        ax = (2*dur*ptv0[0] - 2*ptDx[0] + dur*ptDv[0])/dur**3
+        bx = (-3*dur*ptv0[0] + 3*ptDx[0] - dur*ptDv[0])/dur**2
+        ay = (2*dur*ptv0[1] - 2*ptDx[1] + dur*ptDv[1])/dur**3
+        by = (-3*dur*ptv0[1] + 3*ptDx[1] - dur*ptDv[1])/dur**2
+
+        # Waypoint interpolation
+        T = t - self.wpT
+        if (option == 0): # normal point
+            self.desx = ax*T**3 + bx*T**2 + ptv0[0]*T + ptx0[0]
+            self.desy = ay*T**3 + by*T**2 + ptv0[1]*T + ptx0[1]
+            self.desyaw = ptDx[2]*T/dur + ptx0[2]
+            self.desvx = 3*ax*T**2 + 2*bx*T + ptv0[0]
+            self.desvy = 3*ay*T**2 + 2*by*T + ptv0[1]
+            self.desax = 6*ax*T + 2*bx
+            self.desay = 6*ay*T + 2*by
+        else: # contant speed point
+            self.desx = ptDx[0]*T/dur + ptx0[0]
+            self.desy = ptDx[1]*T/dur + ptx0[1]
+            self.desyaw = ptDx[2]*T/dur + ptx0[2]
+            self.desvx = pts[self.ind,3]
+            self.desvy = pts[self.ind,4]
+            self.desax = 0.0
+            self.desay = 0.0
+        
+
+        if (T >= dur): # next waypoint index
+            if (self.ind == n_pts):
+                self.ind = 2
+            else:
+                self.ind = self.ind + 1
+            self.wpT = self.wpT + dur
+
+        #print "%u %3.2f %3.2f %3.2f %3.2f %3.2f %3.2f" % (self.ind, ptx0[0], ptx0[1], ptx0[2] ,ptDx[0], ptDx[1], ptDx[2])
+
+    def Raibert(self):
         # Raibert controller
-        #'''
         # Parameters
-        KPx = self.params.leftFreq[0] #Raibert position control gain
-        Kx = self.params.leftFreq[1] #Raibert velocity control gain
-        Vxmax = self.params.leftFreq[2] #Raibert control max speed
+        KPx = self.params.leftFreq[0] #Raibert position control gain ((m/s)/m)
+        Kx = self.params.leftFreq[1] #Raibert velocity control gain (m/(m/s))
+        Vxmax = self.params.leftFreq[2] #Raibert control max speed (m/s)
         KPy = self.params.leftFreq[3]
         Ky = self.params.leftFreq[4]
         Vymax = self.params.leftFreq[5]
-        Ts = 0.06   # stance time in seconds
-        L = 0.225   # leg length in meters
-        KV = 1.0    # between 0 and 1
+        Ax = 0.01   # leg deflection for desired acceleration (m/(m/s^2))
+        Ay = 0.01
+        if salto_name == 3:
+            Ts = 0.07
+        else:
+            Ts = 0.06   # stance time (seconds)
+        L = 0.225   # leg length (meters)
+        KV = 1.0    # between 0 and 1 (unitless)
+
         # Desired velocities
-        RB = np.matrix([[np.cos(euler[0]),np.sin(euler[0])],[-np.sin(euler[0]),np.cos(euler[0])]])
+        RB = np.matrix([[np.cos(self.euler[0]),np.sin(self.euler[0])],[-np.sin(self.euler[0]),np.cos(self.euler[0])]])
         Berr = np.dot(RB,[[self.pos[0]-self.desx],[self.pos[1]-self.desy]])
         Bv = np.dot(RB,[[self.vel[0]],[self.vel[1]]])
         Bvdes = np.dot(RB,[[self.desvx],[self.desvy]])
+        Bades = np.dot(RB,[[self.desax],[self.desay]])
         vxdes = -KPx*Berr[0] + KV*Bvdes[0]
         vxdes = max(min(vxdes,Vxmax),-Vxmax)
         vydes = -KPy*Berr[1] + KV*Bvdes[1]
         vydes = max(min(vydes,Vymax),-Vymax)
+
         # Desired foot distances
-        xf = Bv[0]*Ts/2 + Kx*(Bv[0] - vxdes)
+        xf = Bv[0]*Ts/2 + Kx*(Bv[0] - vxdes) - Ax*Bades[0]
         xf = max(min(xf,L/2),-L/2) # limit foot deflection
-        yf = Bv[1]*Ts/2 + Ky*(Bv[1] - vydes)
+        yf = Bv[1]*Ts/2 + Ky*(Bv[1] - vydes) - Ay*Bades[1]
         yf = max(min(yf,L/2),-L/2) # limit foot deflection
+
         # Roll and pitch angles
         th = -math.asin(-xf/L) #TODO: fix pitch sign error
         ph = math.asin(yf/L)
 
-        ctrl = [-th, self.params.phase[0], self.params.phase[1]]
-        roll = ph
+        ctrl = [ph, -th, self.params.phase[0], self.params.phase[1]]
         #print(int(1000*xf),int(1000*yf))
         #print(int(57*th),int(57*ph))
-        #''' # end Raibert controller
 
+        return ctrl
+
+    '''
+    def RaibertInspired(self):
         # Raibert-inspired controller
-        '''
         ctrl = [-self.params.leftFreq[0]*(self.vel[0]-self.desvx) - self.params.leftFreq[1]*max(min(self.pos[0]-self.desx, self.params.leftFreq[2]),-self.params.leftFreq[2]), self.params.phase[0], self.params.phase[1]] # Simple controller
         yaw = 0.0 #TODO: make this a parameter
         roll = self.params.leftFreq[3]*(self.vel[1]-self.desvy) + self.params.leftFreq[4]*max(min(self.pos[1]-self.desy,self.params.leftFreq[5]),-self.params.leftFreq[5])
 
         # Correct deflections for yaw deflections
-        roll_b = np.cos(euler[0])*roll + np.sin(euler[0])*ctrl[0]
-        pitch_b = np.cos(euler[0])*ctrl[0] - np.sin(euler[0])*roll
-        roll = roll_b
+        roll_b = np.cos(self.euler[0])*roll + np.sin(self.euler[0])*ctrl[0]
+        pitch_b = np.cos(self.euler[0])*ctrl[0] - np.sin(self.euler[0])*roll
         ctrl[0] = pitch_b
-        ''' # end Raibert-inspired controller
+        ctrl = np.concatenate(([roll],ctrl), 1)
 
-        # ROBOT COMMANDS --------------------------------------------
-        AngleScaling = 7334;#7334; # rad to 16b 2000deg/s integrated 1000Hz
-            # 180(deg)/pi(rad) * 2**16(ticks)/2000(deg/s) * 1000(Hz) = 1877468
-            # 1877467 / 2**8 = 7334
-        LengthScaling = 256; # radians to 23.8 fixed pt radians
-        CurrentScaling = 256; # radians to 23.8 fixed pt radians
-        ES = [int(euler[0]*AngleScaling),int(euler[1]*AngleScaling),int(euler[2]*AngleScaling)]
-
-        if np.isnan(ctrl[0]): # NaN check
-            ctrl[0] = 0
-        if np.isnan(ctrl[1]):
-            ctrl[1] = 65
-        if np.isnan(ctrl[2]):
-            ctrl[2] = 65
-
-        CS = [int(ctrl[0]*AngleScaling),int(ctrl[1]*LengthScaling),int(ctrl[2]*CurrentScaling)]
-        Cyaw = int(AngleScaling*yaw)
-        Croll = int(AngleScaling*roll)
-        
-        if self.MJ_state == 0:
-            self.xbee_sending = 1
-
-            '''
-            rot_rol = quaternion_about_axis(Croll/AngleScaling,(1,1,-1))
-            mat_rol = quaternion_matrix()
-            rot_pit = quaternion_about_axis()
-            mat_pit = quaternion_matrix()
-            '''
-
-            toSend = [ES[0], ES[1], ES[2], Cyaw, Croll, CS[0], CS[1], CS[2]]
-            for i in range(8):
-                if toSend[i] > 32767:
-                    toSend[i] = 32767
-                elif toSend[i] < -32767:
-                    toSend[i] = -32767
-            xb_send(0, command.INTEGRATED_VICON, pack('8h',*toSend))
-            self.xbee_sending = 0
-
-            # Printing
-            #print(self.step_ind,ctrl[0],ctrl[1],ctrl[2]) # Deadbeat
-            #print(self.pos[0],self.pos[1],self.pos[2])
-            print(Cyaw*57/AngleScaling,Croll*57/AngleScaling,CS[0]*57/AngleScaling)
-            #print(euler[0]*57,euler[1]*57,euler[2]*57)
-            #print([ES[0], ES[1], ES[2], Cyaw, Croll, CS[0]])
-            #print(Cyaw, Croll, CS[0], CS[1], CS[2]) # Commands
-            #print(Croll,ctrl[0],ctrl[1],ctrl[2]) # cmds before scaling
-            #print(np.hstack((ctrl.T, [self.acc])))
-            #print(self.desx, self.desvx) # Raibert position
-            #print(57*ES[0]/AngleScaling, 57*ES[1]/AngleScaling, 57*ES[2]/AngleScaling)
-
-            # Publish commands
-            self.ctrl_pub_rol.publish(Croll)
-            self.ctrl_pub_pit.publish(CS[0])
-            self.ctrl_pub_yaw.publish(Cyaw)
-            self.ctrl_pub_ret.publish(CS[1])
-            self.ctrl_pub_ext.publish(CS[2])
-
-        elif self.MJ_state == 1:
-            self.xbee_sending = 1
-            toSend = [ES[0], ES[1], ES[2], Cyaw, 0, 0, 70*256, 70*256]
-            xb_send(0, command.INTEGRATED_VICON, pack('8h',*toSend))
-            self.xbee_sending = 0
-        elif self.MJ_state == 2:
-            rospy.sleep(0.001)
-            #stopSignal = [0]
-            #xb_send(0, command.STOP_EXPERIMENT, pack('h', *stopSignal))
-        elif self.MJ_state == 3:
-            rospy.sleep(0.001)
-            #if self.telemetry_read == 0:
-            #    flashReadback(self.numSamples, self.params, self.manParams)
-            #    self.telemetry_read = 1
-
-
-        t = data.header.stamp.to_sec()
-        x = np.array([data.transform.rotation.x,data.transform.rotation.y,data.transform.rotation.z,data.transform.rotation.w, data.transform.translation.x,data.transform.translation.y,data.transform.translation.z,t])
-        self.tf_pub.sendTransform((x[4], x[5], x[6]), (x[0], x[1], x[2], x[3]), rospy.Time.now(), "jumper", "world")
-
-        '''
-        self.step_ind += 1
-        if self.step_ind > 100:
-            self.step_ind = 0
-
-        self.R1.setServo(-self.step_ind*0.005-0.4)
-        '''
+        return ctrl
+    '''
 
 if __name__ == '__main__':
     try:
