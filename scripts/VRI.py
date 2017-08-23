@@ -26,12 +26,12 @@ import salto_config
 EXIT_WAIT = False
 
 # Salto:
-salto_name = 2 # 1: Salto-1P Santa, 2: Salto-1P Rudolph, 3: Salto-1P Dasher
+salto_name = 1 # 1: Salto-1P Santa, 2: Salto-1P Rudolph, 3: Salto-1P Dasher
 
 # Parameters
 alpha_v = 0.5 # velocity first-order low-pass
 alpha_a = 0.1 # acceleration first-order low-pass
-dt = 0.01 #(1.0/300.0) # Vicon frame time step
+dt = 0.01#(1.0/120.0)# 0.01 # Vicon frame time step
 rot_off = quaternion_about_axis(2.094,(1,1,-1)) # robot rotation from Vicon body frame
 pos_off = [0.0165,0.07531,-0.04] # coords of the robot origin in the Vicon body frame
 #[0.00587, 0.0165, -0.07531]
@@ -98,7 +98,7 @@ class VRI:
         self.startTime = time.time()
         
         self.ind = 0
-        self.wpT = 0
+        self.wpT = time.time()
 
         # SETUP -----------------------
         setupSerial()
@@ -108,14 +108,20 @@ class VRI:
         #  [ Kp , Ki , Kd , Kaw , Kff     ,  Kp , Ki , Kd , Kaw , Kff ]
         #    ----------LEFT----------        ---------_RIGHT----------
         motorgains = [160,0,30,0,0,0,0,0,0,0]
-        thrustgains = [160,0,110,160,0,110]
+        thrustgains = [170,0,120,170,0,120]
         # roll kp, ki, kd; yaw kp, ki, kd
 
         duration = 5000
         rightFreq = thrustgains # thruster gains
-        leftFreq = [0.16, 0.2, 0.5, .16, 0.12, 0.25] # Raibert-like gains
-        #           xv xp xsat yv yp ysat
-        phase = [60, 85] # Raibert leg extension
+        if salto_name == 1:
+            leftFreq = [0.16, 0.2, 0.5, .16, 0.12, 0.25] # Raibert-like gains
+            #           xv xp xsat yv yp ysat
+        elif salto_name == 2:
+            leftFreq = [0.16, 0.2, 0.5, .16, 0.12, 0.25]
+        elif salto_name == 3:
+            leftFreq = [0.16, 0.2, 0.5, .16, 0.12, 0.25]
+
+        phase = [65, 80] # Raibert leg extension
         #       retract extend
         telemetry = True
         repeat = False
@@ -134,14 +140,14 @@ class VRI:
         # BEGIN -----------------------
         rospy.init_node('VRI')
         if salto_name == 1:
-            #rospy.Subscriber('vicon/jumper1/jumper1', TransformStamped, self.callback)
-            rospy.Subscriber('vicon/jumper/body', TransformStamped, self.callback)
+            rospy.Subscriber('vicon/jumper1/jumper1', TransformStamped, self.callback)
+            #rospy.Subscriber('vicon/jumper/body', TransformStamped, self.callback)
         elif salto_name == 2:
-            #rospy.Subscriber('vicon/jumper2/jumper2', TransformStamped, self.callback)
-            rospy.Subscriber('vicon/Rudolph/body', TransformStamped, self.callback)
+            rospy.Subscriber('vicon/jumper2/jumper2', TransformStamped, self.callback)
+            #rospy.Subscriber('vicon/Rudolph/body', TransformStamped, self.callback)
         elif salto_name == 3:
-            #rospy.Subscriber('vicon/jumper3/jumper3', TransformStamped, self.callback)
-            rospy.Subscriber('vicon/Dasher/body', TransformStamped, self.callback)
+            rospy.Subscriber('vicon/jumper3/jumper3', TransformStamped, self.callback)
+            #rospy.Subscriber('vicon/Dasher/body', TransformStamped, self.callback)
         s = rospy.Service('MJ_state_server',MJstate,self.handle_MJ_state)
 
         # Initiate telemetry recording; the robot will begin recording immediately when cmd is received.
@@ -167,7 +173,7 @@ class VRI:
         xb_send(0, command.START_EXPERIMENT, pack('h', *exp))
         
         self.startTime = time.time()
-        self.wpT = 0
+        self.wpT = time.time()
         self.ind = 0
         self.step_ind = 0
         self.last_step = self.startTime
@@ -262,7 +268,136 @@ class VRI:
         # HOPPING ---------------------------------------------------
         # ctrl = self.Deadbeat()
 
-        waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 65, 80, 3.0, 0]]) # in place
+        waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 60, 80, 3.0, 2]]) # in place
+
+        '''
+        # MAST Boxes
+        waypts = np.array([
+            [-2.1, -2.1, 0.0,        0.0, 0.0, 62, 80, 6.0, 0], # stabilize
+            [0.0, -2.1, 0.0,         0.0, 0.0, 55, 85, 3.0, 2], # jump up the step
+            [0.0, -2.1, 0.0,         0.0, 0.0, 62, 80, 4.0, 2], # stabilize
+            [2.0, -2.1, 0.0,         0.5, 0.0, 62, 80, 4.0, 2], # jump over terrain
+            [4.0, -2.1, 0.0,         0.5, 0.0, 65, 80, 4.0, 2], # jump down ramp
+            [4.75, -1.25, math.pi/2, 0.0, 0.5, 62, 80, 3.0, 0], # turning ...
+            [4.0, -0.5, math.pi,     -0.5, 0.0, 62, 80, 3.0, 0], # turning ...
+            [-3.0, -0.5, math.pi,    0.0, 0.0, 62, 80, 10.0, 0], # go across
+            [-3.0, -0.5, math.pi/2,  0.0, 0.0, 62, 80, 4.0, 0], # turn
+            [-3.0, -2.0, math.pi/2,  0.0, 0.0, 62, 80, 3.0, 0], # go across
+            [-3.0, -2.0, math.pi/2,  0.0, 0.0, 67, 80, 4.0, 2]]) # stop
+
+        if salto_name == 1:
+            waypts = np.array([
+                [-2.0, -2.1, 0.0,        0.0, 0.0, 67, 80, 6.0, 0], # stabilize
+                [0.0, -2.1, 0.0,         0.0, 0.0, 60, 80, 3.0, 2], # jump up the step
+                [0.0, -2.1, 0.0,         0.0, 0.0, 67, 80, 4.0, 2], # stabilize
+                [2.0, -2.1, 0.0,         0.5, 0.0, 67, 80, 4.0, 2], # jump over terrain
+                [4.0, -2.1, 0.0,         0.5, 0.0, 70, 80, 4.0, 2], # jump down ramp
+                [4.75, -1.25, math.pi/2, 0.0, 0.5, 67, 80, 3.0, 0], # turning ...
+                [4.0, -0.5, math.pi,     -0.5, 0.0, 67, 80, 3.0, 0], # turning ...
+                [-3.0, -0.5, math.pi,    0.0, 0.0, 67, 80, 10.0, 0], # go across
+                [-3.0, -0.5, math.pi/2,  0.0, 0.0, 67, 80, 4.0, 0], # turn
+                [-3.0, -2.0, math.pi/2,  0.0, 0.0, 67, 80, 3.0, 0], # go across
+                [-3.0, -2.0, math.pi/2,  0.0, 0.0, 67, 80, 4.0, 2]]) # stop
+        '''
+
+        #'''
+        # MAST Flat
+        waypts = np.array([
+            [-1.0, -0.5, math.pi,     0.0, 0.0, 65, 80, 4.0, 0], # initial
+            [-3.0, -0.5, math.pi,    0.0, 0.0, 60, 80, 4.0, 0], # go back
+            [-3.0, -0.5, math.pi,    0.0, 0.0, 60, 80, 1.0, 0],
+            [4.0, -0.5, math.pi,     0.5, 0.0, 60, 80, 4.0, 2], # go fast
+            [4.75, 0.25, -math.pi/2, 0.0, 0.5, 62, 80, 3.0, 2], # turning ...
+            [4.0, 1.0, 0.0,          -0.5, 0.0, 62, 80, 3.0, 0], # turning ...
+            [3.0, 1.0, math.pi/2,    0.0, 0.0, 62, 80, 3.0, 0], # turn at end ...
+            [2.0, 1.0, math.pi,      0.0, 0.0, 62, 80, 3.0, 0], # turn at end
+            [-3.0, 1.0, math.pi,     0.0, 0.0, 62, 80, 8.0, 0],
+            [-3.0, 1.0, -math.pi/2,  0.0, 0.0, 62, 80, 3.0, 0], # turn
+            [-3.0, -2.0, -math.pi/2, 0.0, 0.0, 62, 80, 6.0, 0], # go across
+            [-3.0, -2.0, -math.pi/2, 0.0, 0.0, 65, 80, 6.0, 2] # stop
+            ])
+
+        if salto_name == 1:
+            waypts = np.array([
+                [-1.0, -0.5, math.pi,     0.0, 0.0, 70, 80, 4.0, 0], # initial
+                [-3.0, -0.5, math.pi,    0.0, 0.0, 65, 80, 4.0, 0], # go back
+                [-3.0, -0.5, math.pi,    0.0, 0.0, 65, 80, 1.0, 0],
+                [4.0, -0.5, math.pi,     0.5, 0.0, 65, 80, 4.0, 2], # go fast
+                [4.75, 0.25, -math.pi/2, 0.0, 0.5, 67, 80, 3.0, 2], # turning ...
+                [4.0, 1.0, 0.0,          -0.5, 0.0, 67, 80, 3.0, 0], # turning ...
+                [3.0, 1.0, math.pi/2,    0.0, 0.0, 67, 80, 3.0, 0], # turn at end ...
+                [2.0, 1.0, math.pi,      0.0, 0.0, 67, 80, 3.0, 0], # turn at end
+                [-3.0, 1.0, math.pi,     0.0, 0.0, 67, 80, 8.0, 0],
+                [-3.0, 1.0, -math.pi/2,  0.0, 0.0, 67, 80, 3.0, 0], # turn
+                [-3.0, -2.0, -math.pi/2, 0.0, 0.0, 67, 80, 6.0, 0], # go across
+                [-3.0, -2.0, -math.pi/2, 0.0, 0.0, 70, 80, 6.0, 2] # stop
+                ])
+        #'''
+
+        '''
+        # MAST try 2
+        waypts = np.array([
+            [2.0, 0.0, 0.0,          0.0, 0.0, 65, 80, 4.0, 0], # initial
+            [4.0, 0.0, 0.0,          0.0, 0.0, 60, 80, 4.0, 0], # go forward
+            [4.0, 0.0, 0.0,          0.0, 0.0, 60, 80, 1.0, 0],
+            [-2.0, 0.0, 0.0,         0.0, 0.0, 60, 80, 4.0, 2], # go fast
+            [-2.0, 0.0, 0.0,         0.0, 0.0, 62, 80, 3.0, 0], # stabilize
+            [-2.0, 0.0, -math.pi/2,  0.0, 0.0, 62, 80, 3.0, 0], # turn
+            [-2.0, -2.1, -math.pi/2, 0.0, 0.0, 62, 80, 4.0, 0], # go across
+            [-2.0, -2.1, 0.0,        0.0, 0.0, 62, 80, 3.0, 0], # turn
+            [-2.0, -2.1, 0.0,        0.0, 0.0, 62, 80, 5.0, 2], # stabilize
+            [0.0, -2.1, 0.0,         0.0, 0.0, 55, 85, 3.0, 2], # jump up the step
+            [0.0, -2.1, 0.0,         0.0, 0.0, 62, 80, 4.0, 2], # stabilize
+            [2.0, -2.1, 0.0,         0.5, 0.0, 62, 80, 4.0, 2], # jump over terrain
+            [4.0, -2.1, 0.0,         0.0, 0.0, 65, 80, 4.0, 2], # jump down ramp
+            [4.0, -2.0, 0.0,         0.0, 0.0, 67, 80, 4.0, 0]]) # stop
+
+        if salto_name == 1:
+            waypts = np.array([
+                [2.0, 0.0, 0.0,          0.0, 0.0, 70, 80, 4.0, 0], # initial
+                [4.0, 0.0, 0.0,          0.0, 0.0, 65, 80, 4.0, 0], # go forward
+                [4.0, 0.0, 0.0,          0.0, 0.0, 65, 80, 1.0, 0],
+                [-2.0, 0.0, 0.0,         0.0, 0.0, 65, 80, 4.0, 2], # go fast
+                [-2.0, 0.0, 0.0,         0.0, 0.0, 67, 80, 3.0, 0], # stabilize
+                [-2.0, 0.0, -math.pi/2,  0.0, 0.0, 67, 80, 3.0, 0], # turn
+                [-2.0, -2.1, -math.pi/2, 0.0, 0.0, 67, 80, 4.0, 0], # go across
+                [-2.0, -2.1, 0.0,        0.0, 0.0, 67, 80, 3.0, 0], # turn
+                [-2.0, -2.1, 0.0,        0.0, 0.0, 67, 80, 5.0, 2], # stabilize
+                [0.0, -2.1, 0.0,         0.0, 0.0, 60, 85, 3.0, 2], # jump up the step
+                [0.0, -2.1, 0.0,         0.0, 0.0, 67, 80, 4.0, 2], # stabilize
+                [2.0, -2.1, 0.0,         0.5, 0.0, 67, 80, 4.0, 2], # jump over terrain
+                [4.0, -2.1, 0.0,         0.0, 0.0, 70, 80, 4.0, 2], # jump down ramp
+                [4.0, -2.0, 0.0,         0.0, 0.0, 72, 80, 4.0, 0]]) # stop
+        '''
+
+        '''
+        # MAST try 1
+        waypts = np.array([
+            [-1.0, -0.5, math.pi,     0.0, 0.0, 65, 80, 4.0, 0], # initial
+            [-3.0, -0.5, math.pi,    0.0, 0.0, 60, 80, 4.0, 0], # go back
+            [-3.0, -0.5, math.pi,    0.0, 0.0, 60, 80, 1.0, 0],
+            [4.0, -0.5, math.pi,     0.5, 0.0, 60, 80, .0, 2], # go fast
+            [4.75, 0.25, -math.pi/2, 0.0, 0.5, 62, 80, 3.0, 0], # turning ...
+            [4.0, 1.0, 0.0,          -0.5, 0.0, 62, 80, 3.0, 0], # turning ...
+            [3.0, 1.0, math.pi/2,    0.0, 0.0, 62, 80, 3.0, 0], # turn at end ...
+            [2.0, 1.0, math.pi,      0.0, 0.0, 62, 80, 3.0, 0], # turn at end
+            [-2.0, 1.0, math.pi,     0.0, 0.0, 62, 80, 6.0, 0],
+            [-2.0, 1.0, -math.pi/2,  0.0, 0.0, 62, 80, 3.0, 0], # turn
+            [-2.0, -2.0, -math.pi/2, 0.0, 0.0, 62, 80, 6.0, 0], # go across
+            [-2.0, -2.0, 0.0,        0.0, 0.0, 60, 80, 3.0, 0], # turn
+            [-2.0, -2.0, 0.0,        0.0, 0.0, 60, 80, 5.0, 2], # stabilize
+            [0.0, -2.0, 0.0,         0.0, 0.0, 55, 85, 3.0, 2], # jump up the step
+            [0.0, -2.0, 0.0,         0.0, 0.0, 62, 80, 4.0, 2], # stabilize
+            [2.0, -2.0, 0.0,         0.0, 0.0, 62, 80, 6.0, 2], # jump over terrain
+            [2.0, -2.0, 0.0,         0.0, 0.0, 62, 80, 4.0, 2], # stabilize
+            [3.5, -2.0, 0.0,         0.0, 0.0, 62, 80, 5.0, 2], # jump off the step (at 2.5)
+            [4.0, -2.0, 0.0,         0.0, 0.0, 67, 80, 4.0, 0]]) # stop
+
+        if salto_name == 1:
+            for i in range(waypts.shape[0]):
+                waypts[i, 5] = waypts[i, 5] + 5
+        '''
+
         '''
         waypts = np.array([ # circle (Dasher)
             [0.0, 0.0, 0.0,         0.0, 0.0,  65, 80, 5.0, 1], # loop
@@ -283,20 +418,35 @@ class VRI:
             [1.8, 0.0, math.pi,     0.0, -0.5, 65, 80, 2.0, 0],
             [1.2, -0.6, math.pi/2,  0.5, 0.0,  65, 80, 2.0, 0]])
         '''
-        #'''
+        '''
+        # Step up and down: step 0.4m high starts at 0.5m, ends at 1.1m
+        waypts = np.array([
+            [-0.2, 0.0, 0.0,  0.0, 0.0, 62, 80, 5.0, 0], # transition out on apex
+            [0.8, 0.0, 0.0,  0.0, 0.0, 60, 80, 2.0, 0], # cubic vel. transition out on clock
+            [0.8, 0.0, 0.0,  0.0, 0.0, 65, 80, 5.0, 2], # transition out on apex
+            [1.8, 0.0, 0.0,  0.0, 0.0, 65, 80, 2.0, 0], # cubic vel. transition out at apex
+            [1.8, 0.0, 0.0,  0.0, 0.0, 65, 80, 3.0, 2]])
+        '''
+        '''
+        waypts = np.array([ # Santa
+            [-0.2, 0.0, 0.0,  0.0, 0.0, 67, 80, 10.0, 0], # transition out on apex
+            [0.8, 0.0, 0.0,  0.0, 0.0, 65, 80, 2.0, 0], # cubic vel. transition out on clock
+            [0.8, 0.0, 0.0,  0.0, 0.0, 70, 80, 5.0, 2], # transition out on apex
+            [1.8, 0.0, 0.0,  0.0, 0.0, 70, 80, 2.0, 0], # cubic vel. transition out at apex
+            [1.8, 0.0, 0.0,  0.0, 0.0, 70, 80, 3.0, 2]])
+        '''
+        '''
         if salto_name == 3:
             waypts = np.array([ # obstacles (Dasher)
                 [-0.3, -0.3, 0.0,       0.0, 0.0, 65, 80, 5.0, 0], # don't loop
                 [0.5, -0.3, 0.0,        0.0, 0.0, 60, 80, 2.0, 0], # onto foam
-                [0.5, -0.3, 0.0,        0.0, 0.0, 60, 85, 5.0, 0], # stay on foam
-                [-1.0, -0.3, 0.0,       0.0, 0.0, 60, 80, 4.0, 0], # go back
-                [1.0, -0.3, 0.0,        0.0, 0.0, 60, 85, 2.0, 0], # go fast
-                [1.0, -0.3, 0.0,        0.0, 0.0, 60, 80, 4.0, 0], # stabilize
-                [1.5, 0.0, math.pi/6,   0.0, 0.0, 60, 85, 3.0, 0], # onto ramp
-                [1.5, 0.4, -math.pi/6,  0.0, 0.0, 60, 80, 3.0, 0], # stay on ramp
-                [1.5, 0.7, 0.0,         0.0, 0.0, 65, 80, 5.0, 0], # down the ramp
-                [1.0, 0.7, 0.0,         0.0, 0.0, 60, 80, 5.0, 0], # stabilize
-                [0.3, 0.7, 0.0,         0.7, 0.0, 60, 85, 1.0, 1], # onto table
+                [0.5, -0.3, 0.0,        0.0, 0.0, 60, 82, 5.0, 0], # stay on foam
+                [1.0, -0.3, 0.0,        0.0, 0.0, 60, 85, 3.0, 0], #
+                [1.7, 0.0, math.pi/6,   0.0, 0.0, 60, 85, 3.0, 0], # onto ramp
+                [1.7, 0.4, -math.pi/6,  0.0, 0.0, 60, 80, 3.0, 0], # stay on ramp
+                [1.0, 0.7, 0.0,         0.0, 0.0, 65, 80, 5.0, 0], # down the ramp
+                [1.0, 0.7, 0.0,         0.0, 0.0, 60, 80, 4.0, 0], # stabilize
+                [0.3, 0.7, 0.0,         1.0, 0.0, 60, 85, 0.7, 1], # onto table
                 [0.3, 0.7, 0.0,         0.0, 0.0, 60, 80, 5.0, 0], # stay on table
                 [-0.3, 0.7, 0.0,        0.0, 0.0, 60, 80, 2.0, 0], # off the table
                 [-0.3, 0.7, -math.pi/2, 0.0, 0.0, 60, 80, 4.0, 0], # turn corner
@@ -307,15 +457,13 @@ class VRI:
             waypts = np.array([ # obstacles (Rudolph)
                 [-0.3, -0.3, 0.0,       0.0, 0.0, 67, 80, 5.0, 0], # don't loop
                 [0.5, -0.3, 0.0,        0.0, 0.0, 63, 80, 2.0, 0], # onto foam
-                [0.5, -0.3, 0.0,        0.0, 0.0, 60, 85, 5.0, 0], # stay on foam
-                [-1.0, -0.3, 0.0,       0.0, 0.0, 63, 80, 3.0, 0], # go back
-                [1.0, -0.3, 0.0,        0.0, 0.0, 60, 85, 2.0, 0], # go fast
-                [1.0, -0.3, 0.0,        0.0, 0.0, 63, 80, 4.0, 0], # stabilize
-                [1.5, 0.0, math.pi/6,   0.0, 0.0, 60, 85, 3.0, 0], # onto ramp
-                [1.5, 0.4, -math.pi/6,  0.0, 0.0, 63, 80, 3.0, 0], # stay on ramp
-                [1.5, 0.7, 0.0,         0.0, 0.0, 67, 80, 5.0, 0], # down the ramp
-                [1.0, 0.7, 0.0,         0.0, 0.0, 63, 80, 5.0, 0], # stabilize
-                [0.3, 0.7, 0.0,         0.7, 0.0, 60, 85, 1.0, 1], # onto table
+                [0.5, -0.3, 0.0,        0.0, 0.0, 60, 80, 5.0, 0], # stay on foam
+                [1.0, -0.3, 0.0,        0.0, 0.0, 63, 80, 3.0, 0], #
+                [1.7, 0.0, math.pi/6,   0.0, 0.0, 60, 85, 3.0, 0], # onto ramp
+                [1.7, 0.4, -math.pi/6,  0.0, 0.0, 63, 80, 3.0, 0], # stay on ramp
+                [1.0, 0.7, 0.0,         0.0, 0.0, 67, 80, 5.0, 0], # down the ramp
+                [1.0, 0.7, 0.0,         0.0, 0.0, 63, 80, 4.0, 0], # stabilize
+                [0.3, 0.7, 0.0,         1.0, 0.0, 60, 85, 0.7, 1], # onto table
                 [0.3, 0.7, 0.0,         0.0, 0.0, 63, 80, 5.0, 0], # stay on table
                 [-0.3, 0.7, 0.0,        0.0, 0.0, 63, 80, 2.0, 0], # off the table
                 [-0.3, 0.7, -math.pi/2, 0.0, 0.0, 63, 80, 4.0, 0], # turn corner
@@ -650,16 +798,17 @@ class VRI:
         #   duration is the time for the leg that ends at x and y in seconds
         #   options:
         #       1st waypoint: 0: no loop, 1: loop
-        #       others: 0: normal waypoint, 1: constant velocity waypoint
+        #       others: 0,2: cubic velocity, 1,3: constant velocity
+        #               0,1: clock start, 2,3: start at apex
         
 
         n_pts = pts.shape[0]
-        t = time.time()-self.startTime
+        t = time.time()
         
         # Waypoint selection
         if (self.ind == 0): # first point
             dur = pts[0,7]
-            option = 0
+            option = 2
             ptx0 = pts[0,0:3]
             ptv0 = np.array([0,0])
             ptDx = np.array([0,0,0])
@@ -714,15 +863,8 @@ class VRI:
 
         # Waypoint interpolation
         T = t - self.wpT
-        if (option == 0): # normal point
-            self.desx = ax*T**3 + bx*T**2 + ptv0[0]*T + ptx0[0]
-            self.desy = ay*T**3 + by*T**2 + ptv0[1]*T + ptx0[1]
-            self.desyaw = ptDx[2]*T/dur + ptx0[2]
-            self.desvx = 3*ax*T**2 + 2*bx*T + ptv0[0]
-            self.desvy = 3*ay*T**2 + 2*by*T + ptv0[1]
-            self.desax = 6*ax*T + 2*bx
-            self.desay = 6*ay*T + 2*by
-        else: # contant speed point
+        T = min(T,dur)
+        if (option == 1 or option == 3): # constant speed point
             self.desx = ptDx[0]*T/dur + ptx0[0]
             self.desy = ptDx[1]*T/dur + ptx0[1]
             self.desyaw = ptDx[2]*T/dur + ptx0[2]
@@ -730,14 +872,28 @@ class VRI:
             self.desvy = pts[self.ind,4]
             self.desax = 0.0
             self.desay = 0.0
-        
+        else: # normal point
+            self.desx = ax*T**3 + bx*T**2 + ptv0[0]*T + ptx0[0]
+            self.desy = ay*T**3 + by*T**2 + ptv0[1]*T + ptx0[1]
+            self.desyaw = ptDx[2]*T/dur + ptx0[2]
+            self.desvx = 3*ax*T**2 + 2*bx*T + ptv0[0]
+            self.desvy = 3*ay*T**2 + 2*by*T + ptv0[1]
+            self.desax = 6*ax*T + 2*bx
+            self.desay = 6*ay*T + 2*by
 
-        if (T >= dur): # next waypoint index
+        
+        # next waypoint index
+        if (T >= dur):
+            if (option == 2 or option == 3) and \
+                not(self.vel[2] < 0.5 and self.vel[2] > -0.5 and self.acc[2] < 0): 
+                return # requires start from apex
+                # TODO: this seems like a hack
+
             if (self.ind == n_pts):
                 self.ind = 2
             else:
                 self.ind = self.ind + 1
-            self.wpT = self.wpT + dur
+            self.wpT = time.time()
 
         #print "%u %3.2f %3.2f %3.2f %3.2f %3.2f %3.2f" % (self.ind, ptx0[0], ptx0[1], ptx0[2] ,ptDx[0], ptDx[1], ptDx[2])
 
@@ -752,10 +908,10 @@ class VRI:
         Vymax = self.params.leftFreq[5]
         Ax = 0.01   # leg deflection for desired acceleration (m/(m/s^2))
         Ay = 0.01
-        if salto_name == 3:
-            Ts = 0.07
+        if salto_name == 1:
+            Ts = 0.06
         else:
-            Ts = 0.06   # stance time (seconds)
+            Ts = 0.07   # stance time (seconds)
         L = 0.225   # leg length (meters)
         KV = 1.0    # between 0 and 1 (unitless)
 

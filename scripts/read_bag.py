@@ -31,8 +31,9 @@ off_mat[0:3,3] = pos_off
 
 for topic, msg, t in rosbag.Bag(name).read_messages():
     if topic == '/vicon/jumper/body' or topic == '/vicon/Rudolph/body' or \
-    topic == 'vicon/Dasher/body' or\
-    topic == '/vicon/jumper1/jumper1' or topic == '/vicon/jumper2/jumper2':
+    topic == '/vicon/Dasher/body' or\
+    topic == '/vicon/jumper1/jumper1' or topic == '/vicon/jumper2/jumper2' or \
+    topic == '/vicon/jumper3/jumper3':
         data = msg
         
         # Extract transform from message
