@@ -2,6 +2,7 @@
 
 import rospy
 from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import Pose
 from std_msgs.msg import Float32
 from ros_ip25.srv import *
 
@@ -31,8 +32,8 @@ salto_name = 3 # 1: Salto-1P Santa, 2: Salto-1P Rudolph, 3: Salto-1P Dasher
 # Parameters
 alpha_v = 0.5 # velocity first-order low-pass
 alpha_a = 0.1 # acceleration first-order low-pass
-dt = 0.01#(1.0/120.0)# 0.01 # Vicon frame time step
-rot_off = quaternion_about_axis(2.094,(1,1,-1)) # robot rotation from Vicon body frame
+dt = 0.01#(1.0/120.0)# 0.01 # Optitrack frame time step
+rot_off = quaternion_about_axis(0,(1,1,1)) # robot rotation from Vicon body frame
 pos_off = [0.0165,0.07531,-0.04] # coords of the robot origin in the Vicon body frame
 #[0.00587, 0.0165, -0.07531]
 #[0.0165,0.07531,-0.00587]
@@ -58,7 +59,7 @@ k = np.delete(k, (2), axis = 0)
 
 n_steps = len(step_list)
 
-class VRI:
+class ORI:
     def __init__(self):
         # Robot position variables
         self.pos = np.array([0,0,0])
@@ -138,16 +139,8 @@ class VRI:
 
 
         # BEGIN -----------------------
-        rospy.init_node('VRI')
-        if salto_name == 1:
-            #rospy.Subscriber('vicon/jumper1/jumper1', TransformStamped, self.callback)
-            rospy.Subscriber('vicon/jumper/body', TransformStamped, self.callback)
-        elif salto_name == 2:
-            #rospy.Subscriber('vicon/jumper2/jumper2', TransformStamped, self.callback)
-            rospy.Subscriber('vicon/Rudolph/body', TransformStamped, self.callback)
-        elif salto_name == 3:
-            #rospy.Subscriber('vicon/jumper3/jumper3', TransformStamped, self.callback)
-            rospy.Subscriber('vicon/Dasher/body', TransformStamped, self.callback)
+        rospy.init_node('ORI')
+        rospy.Subscriber('Robot_1/pose', Pose, self.callback)
         s = rospy.Service('MJ_state_server',MJstate,self.handle_MJ_state)
 
         # Initiate telemetry recording; the robot will begin recording immediately when cmd is received.
@@ -224,8 +217,8 @@ class VRI:
 
         # VICON DATA ------------------------------------------------
         # Extract transform from message
-        rot = data.transform.rotation
-        tr = data.transform.translation
+        rot = data.orientation
+        tr = data.position
         q = np.array([rot.x, rot.y, rot.z, rot.w])
         pos = np.array([tr.x, tr.y, tr.z])
 
@@ -273,139 +266,11 @@ class VRI:
         #'''
         # Forwards backwards
         waypts = np.array([
-            [-0.3, 0.0, 0.0,    0.0, 0.0, 60, 80, 3.0, 0], # stabilize
+            [-0.3, 0.0, 0.0,    0.0, 0.0, 60, 80, 3.0, 1], # stabilize
             [1.8, 0.0, 0.0,     0.0, 0.0, 60, 80, 4.0, 2], #forwards
             [-0.3, 0.0, 0.0,    0.0, 0.0, 60, 80, 4.0, 2], #backwards
             ])
         #'''
-
-        '''
-        # MAST Boxes
-        waypts = np.array([
-            [-2.1, -2.1, 0.0,        0.0, 0.0, 62, 80, 6.0, 0], # stabilize
-            [0.0, -2.1, 0.0,         0.0, 0.0, 55, 85, 3.0, 2], # jump up the step
-            [0.0, -2.1, 0.0,         0.0, 0.0, 62, 80, 4.0, 2], # stabilize
-            [2.0, -2.1, 0.0,         0.5, 0.0, 62, 80, 4.0, 2], # jump over terrain
-            [4.0, -2.1, 0.0,         0.5, 0.0, 65, 80, 4.0, 2], # jump down ramp
-            [4.75, -1.25, math.pi/2, 0.0, 0.5, 62, 80, 3.0, 0], # turning ...
-            [4.0, -0.5, math.pi,     -0.5, 0.0, 62, 80, 3.0, 0], # turning ...
-            [-3.0, -0.5, math.pi,    0.0, 0.0, 62, 80, 10.0, 0], # go across
-            [-3.0, -0.5, math.pi/2,  0.0, 0.0, 62, 80, 4.0, 0], # turn
-            [-3.0, -2.0, math.pi/2,  0.0, 0.0, 62, 80, 3.0, 0], # go across
-            [-3.0, -2.0, math.pi/2,  0.0, 0.0, 67, 80, 4.0, 2]]) # stop
-
-        if salto_name == 1:
-            waypts = np.array([
-                [-2.0, -2.1, 0.0,        0.0, 0.0, 67, 80, 6.0, 0], # stabilize
-                [0.0, -2.1, 0.0,         0.0, 0.0, 60, 80, 3.0, 2], # jump up the step
-                [0.0, -2.1, 0.0,         0.0, 0.0, 67, 80, 4.0, 2], # stabilize
-                [2.0, -2.1, 0.0,         0.5, 0.0, 67, 80, 4.0, 2], # jump over terrain
-                [4.0, -2.1, 0.0,         0.5, 0.0, 70, 80, 4.0, 2], # jump down ramp
-                [4.75, -1.25, math.pi/2, 0.0, 0.5, 67, 80, 3.0, 0], # turning ...
-                [4.0, -0.5, math.pi,     -0.5, 0.0, 67, 80, 3.0, 0], # turning ...
-                [-3.0, -0.5, math.pi,    0.0, 0.0, 67, 80, 10.0, 0], # go across
-                [-3.0, -0.5, math.pi/2,  0.0, 0.0, 67, 80, 4.0, 0], # turn
-                [-3.0, -2.0, math.pi/2,  0.0, 0.0, 67, 80, 3.0, 0], # go across
-                [-3.0, -2.0, math.pi/2,  0.0, 0.0, 67, 80, 4.0, 2]]) # stop
-        '''
-
-        '''
-        # MAST Flat
-        waypts = np.array([
-            [-1.0, -0.5, math.pi,     0.0, 0.0, 65, 80, 4.0, 0], # initial
-            [-3.0, -0.5, math.pi,    0.0, 0.0, 60, 80, 4.0, 0], # go back
-            [-3.0, -0.5, math.pi,    0.0, 0.0, 60, 80, 1.0, 0],
-            [4.0, -0.5, math.pi,     0.5, 0.0, 60, 80, 4.0, 2], # go fast
-            [4.75, 0.25, -math.pi/2, 0.0, 0.5, 62, 80, 3.0, 2], # turning ...
-            [4.0, 1.0, 0.0,          -0.5, 0.0, 62, 80, 3.0, 0], # turning ...
-            [3.0, 1.0, math.pi/2,    0.0, 0.0, 62, 80, 3.0, 0], # turn at end ...
-            [2.0, 1.0, math.pi,      0.0, 0.0, 62, 80, 3.0, 0], # turn at end
-            [-3.0, 1.0, math.pi,     0.0, 0.0, 62, 80, 8.0, 0],
-            [-3.0, 1.0, -math.pi/2,  0.0, 0.0, 62, 80, 3.0, 0], # turn
-            [-3.0, -2.0, -math.pi/2, 0.0, 0.0, 62, 80, 6.0, 0], # go across
-            [-3.0, -2.0, -math.pi/2, 0.0, 0.0, 65, 80, 6.0, 2] # stop
-            ])
-
-        if salto_name == 1:
-            waypts = np.array([
-                [-1.0, -0.5, math.pi,     0.0, 0.0, 70, 80, 4.0, 0], # initial
-                [-3.0, -0.5, math.pi,    0.0, 0.0, 65, 80, 4.0, 0], # go back
-                [-3.0, -0.5, math.pi,    0.0, 0.0, 65, 80, 1.0, 0],
-                [4.0, -0.5, math.pi,     0.5, 0.0, 65, 80, 4.0, 2], # go fast
-                [4.75, 0.25, -math.pi/2, 0.0, 0.5, 67, 80, 3.0, 2], # turning ...
-                [4.0, 1.0, 0.0,          -0.5, 0.0, 67, 80, 3.0, 0], # turning ...
-                [3.0, 1.0, math.pi/2,    0.0, 0.0, 67, 80, 3.0, 0], # turn at end ...
-                [2.0, 1.0, math.pi,      0.0, 0.0, 67, 80, 3.0, 0], # turn at end
-                [-3.0, 1.0, math.pi,     0.0, 0.0, 67, 80, 8.0, 0],
-                [-3.0, 1.0, -math.pi/2,  0.0, 0.0, 67, 80, 3.0, 0], # turn
-                [-3.0, -2.0, -math.pi/2, 0.0, 0.0, 67, 80, 6.0, 0], # go across
-                [-3.0, -2.0, -math.pi/2, 0.0, 0.0, 70, 80, 6.0, 2] # stop
-                ])
-        '''
-
-        '''
-        # MAST try 2
-        waypts = np.array([
-            [2.0, 0.0, 0.0,          0.0, 0.0, 65, 80, 4.0, 0], # initial
-            [4.0, 0.0, 0.0,          0.0, 0.0, 60, 80, 4.0, 0], # go forward
-            [4.0, 0.0, 0.0,          0.0, 0.0, 60, 80, 1.0, 0],
-            [-2.0, 0.0, 0.0,         0.0, 0.0, 60, 80, 4.0, 2], # go fast
-            [-2.0, 0.0, 0.0,         0.0, 0.0, 62, 80, 3.0, 0], # stabilize
-            [-2.0, 0.0, -math.pi/2,  0.0, 0.0, 62, 80, 3.0, 0], # turn
-            [-2.0, -2.1, -math.pi/2, 0.0, 0.0, 62, 80, 4.0, 0], # go across
-            [-2.0, -2.1, 0.0,        0.0, 0.0, 62, 80, 3.0, 0], # turn
-            [-2.0, -2.1, 0.0,        0.0, 0.0, 62, 80, 5.0, 2], # stabilize
-            [0.0, -2.1, 0.0,         0.0, 0.0, 55, 85, 3.0, 2], # jump up the step
-            [0.0, -2.1, 0.0,         0.0, 0.0, 62, 80, 4.0, 2], # stabilize
-            [2.0, -2.1, 0.0,         0.5, 0.0, 62, 80, 4.0, 2], # jump over terrain
-            [4.0, -2.1, 0.0,         0.0, 0.0, 65, 80, 4.0, 2], # jump down ramp
-            [4.0, -2.0, 0.0,         0.0, 0.0, 67, 80, 4.0, 0]]) # stop
-
-        if salto_name == 1:
-            waypts = np.array([
-                [2.0, 0.0, 0.0,          0.0, 0.0, 70, 80, 4.0, 0], # initial
-                [4.0, 0.0, 0.0,          0.0, 0.0, 65, 80, 4.0, 0], # go forward
-                [4.0, 0.0, 0.0,          0.0, 0.0, 65, 80, 1.0, 0],
-                [-2.0, 0.0, 0.0,         0.0, 0.0, 65, 80, 4.0, 2], # go fast
-                [-2.0, 0.0, 0.0,         0.0, 0.0, 67, 80, 3.0, 0], # stabilize
-                [-2.0, 0.0, -math.pi/2,  0.0, 0.0, 67, 80, 3.0, 0], # turn
-                [-2.0, -2.1, -math.pi/2, 0.0, 0.0, 67, 80, 4.0, 0], # go across
-                [-2.0, -2.1, 0.0,        0.0, 0.0, 67, 80, 3.0, 0], # turn
-                [-2.0, -2.1, 0.0,        0.0, 0.0, 67, 80, 5.0, 2], # stabilize
-                [0.0, -2.1, 0.0,         0.0, 0.0, 60, 85, 3.0, 2], # jump up the step
-                [0.0, -2.1, 0.0,         0.0, 0.0, 67, 80, 4.0, 2], # stabilize
-                [2.0, -2.1, 0.0,         0.5, 0.0, 67, 80, 4.0, 2], # jump over terrain
-                [4.0, -2.1, 0.0,         0.0, 0.0, 70, 80, 4.0, 2], # jump down ramp
-                [4.0, -2.0, 0.0,         0.0, 0.0, 72, 80, 4.0, 0]]) # stop
-        '''
-
-        '''
-        # MAST try 1
-        waypts = np.array([
-            [-1.0, -0.5, math.pi,     0.0, 0.0, 65, 80, 4.0, 0], # initial
-            [-3.0, -0.5, math.pi,    0.0, 0.0, 60, 80, 4.0, 0], # go back
-            [-3.0, -0.5, math.pi,    0.0, 0.0, 60, 80, 1.0, 0],
-            [4.0, -0.5, math.pi,     0.5, 0.0, 60, 80, .0, 2], # go fast
-            [4.75, 0.25, -math.pi/2, 0.0, 0.5, 62, 80, 3.0, 0], # turning ...
-            [4.0, 1.0, 0.0,          -0.5, 0.0, 62, 80, 3.0, 0], # turning ...
-            [3.0, 1.0, math.pi/2,    0.0, 0.0, 62, 80, 3.0, 0], # turn at end ...
-            [2.0, 1.0, math.pi,      0.0, 0.0, 62, 80, 3.0, 0], # turn at end
-            [-2.0, 1.0, math.pi,     0.0, 0.0, 62, 80, 6.0, 0],
-            [-2.0, 1.0, -math.pi/2,  0.0, 0.0, 62, 80, 3.0, 0], # turn
-            [-2.0, -2.0, -math.pi/2, 0.0, 0.0, 62, 80, 6.0, 0], # go across
-            [-2.0, -2.0, 0.0,        0.0, 0.0, 60, 80, 3.0, 0], # turn
-            [-2.0, -2.0, 0.0,        0.0, 0.0, 60, 80, 5.0, 2], # stabilize
-            [0.0, -2.0, 0.0,         0.0, 0.0, 55, 85, 3.0, 2], # jump up the step
-            [0.0, -2.0, 0.0,         0.0, 0.0, 62, 80, 4.0, 2], # stabilize
-            [2.0, -2.0, 0.0,         0.0, 0.0, 62, 80, 6.0, 2], # jump over terrain
-            [2.0, -2.0, 0.0,         0.0, 0.0, 62, 80, 4.0, 2], # stabilize
-            [3.5, -2.0, 0.0,         0.0, 0.0, 62, 80, 5.0, 2], # jump off the step (at 2.5)
-            [4.0, -2.0, 0.0,         0.0, 0.0, 67, 80, 4.0, 0]]) # stop
-
-        if salto_name == 1:
-            for i in range(waypts.shape[0]):
-                waypts[i, 5] = waypts[i, 5] + 5
-        '''
 
         '''
         waypts = np.array([ # circle (Dasher)
@@ -561,8 +426,9 @@ class VRI:
             #    self.telemetry_read = 1
 
 
-        t = data.header.stamp.to_sec()
-        x = np.array([data.transform.rotation.x,data.transform.rotation.y,data.transform.rotation.z,data.transform.rotation.w, data.transform.translation.x,data.transform.translation.y,data.transform.translation.z,t])
+        #t = data.header.stamp.to_sec()
+        t = rospy.Time.now
+        x = np.array([data.position.x,data.position.y,data.position.z,data.orientation.w, data.orientation.x,data.orientation.y,data.orientation.z,t])
         self.tf_pub.sendTransform((x[4], x[5], x[6]), (x[0], x[1], x[2], x[3]), rospy.Time.now(), "jumper", "world")
 
         '''
@@ -572,230 +438,6 @@ class VRI:
 
         self.R1.setServo(-self.step_ind*0.005-0.4)
         '''
-
-    '''
-    def Deadbeat(self):
-        # DEADBEAT CONTROLLER ---------------------------------------
-        # Calculate desired takeoff velocity
-        #   foot planning
-        indNext = min(self.step_ind, n_steps-1)
-        indAim = min(self.step_ind+1, n_steps-1)
-        ptNext = step_list[indNext,:]
-        ptAim = step_list[indAim,:]
-        GLnext = ptNext[1]
-        vzNext = ptNext[2]
-        
-        g = 9.81
-        l = 0.2
-
-        pz = self.pos[2] - l - GLnext
-        px = self.pos[0]
-        vz = self.vel[2]
-        vx = self.vel[0]
-        
-        tTD = (vz + (vz**2 + 2*g*pz)**0.5)/g
-        xTD = px + vx*tTD
-        launch = [xTD,GLnext]
-        Dstep = ptAim[0:2] - launch
-
-        tP = (vz + (vzNext**2 - 2*g*(Dstep[1]-l)))/g
-        vxNext = Dstep[0]/(tP + l/vzNext)
-
-        vTD = [vx, vz - g*tTD]
-
-        #   simple test: stay near 0
-        vi = vTD
-        #vo = [-0.3*self.pos[0],vzNext]
-        vo = [vxNext, vzNext]
-
-        # Calculate touchdown angle, leg length, and leg current
-        x_vect = np.vstack((1, np.matrix(vi).T, np.matrix(vo).T, 
-            vi[0]*vi[0], vo[0]*vo[0], vi[0]*vo[0],
-            vi[1]*vi[1], vo[1]*vo[1], vi[1]*vo[1],
-            vi[0]*vi[1], vi[0]*vo[1], vi[1]*vo[0], vo[0]*vo[1]))
-
-        ctrl = k.dot(x_vect)
-
-        # bottom-out preventing shift
-        ctrl[1] = ctrl[1] - 10
-        ctrl[2] = ctrl[2] - 10
-
-        # bottom-out protection
-        ctrl[1] = min(ctrl[1], -65)
-        ctrl[1] = max(ctrl[1], -80)
-        ctrl[2] = max(ctrl[2], -80)
-
-        # initial override
-        if time.time()-self.startTime < 0.3:
-            ctrl[0] = 0
-            ctrl[1] = -75
-            ctrl[2] = -75
-
-        return np.concatenate(([0],ctrl),1)
-    '''
-
-    '''
-    def Trajectory(self, traj_name):
-        # RAIBERT-INSPIRED SIMPLE HOPPING ---------------------------
-        # TRAJECTORIES --------------------------
-        # Forwards-backwards
-        if traj_name == 'Forwards-Backwards':
-
-            FBvel = 1.0/2.0
-            FBslowdown = 1 # factor to reduce commanded velocity
-            startDwell = 3.0
-            offset = 0
-            yoffset = 0
-            yscale = 0.0
-            endPt = 1.5
-            if (time.time()-self.startTime) < startDwell:
-                self.desx = offset
-                self.desvx = 0.0
-
-                self.desy = -yscale*endPt/2.0 + yoffset
-                self.desvy = 0.0
-            elif (time.time()-self.startTime-startDwell) % (2.0*endPt/FBvel) > (endPt/FBvel): # backwards
-                self.desx = endPt - FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) + offset
-                self.desvx = -FBvel*FBslowdown
-                self.desy = yscale*(endPt - FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) - endPt/2.0) + yoffset
-                self.desvy = yscale*self.desvx
-            else: # forwards
-                self.desx = FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) + offset
-                self.desvx = FBvel*FBslowdown
-                self.desy = yscale*(FBvel*((time.time()-self.startTime-startDwell)%(endPt/FBvel)) - endPt/2.0) + yoffset
-                self.desvy = yscale*self.desvx
-            #print(self.desx,self.desvx,self.desy,self.desvy)
-            # end Forwards-backwards
-        
-        elif traj_name == 'Vertical Variation':
-            # Vertical variation
-            if (time.time()-self.startTime) % 12.0 > 9.0:
-                self.params.phase[1] = 70
-            elif (time.time()-self.startTime) % 12.0 > 6.0:
-                self.params.phase[1] = 80
-            elif (time.time()-self.startTime) % 12.0 > 3.0:
-                self.params.phase[1] = 75
-            else:
-                self.params.phase[1] = 80
-            # end Vertical variation
-
-        elif traj_name == 'Yaw Sweep':
-            yawVel = 0.5
-            yawDwell = 3.0
-
-            yawAmp = 2.0
-            if (time.time()-self.startTime) < yawDwell:
-                self.desyaw = 0.0
-            elif (time.time()-self.startTime-yawDwell+yawAmp/yawVel) % (4.0*yawAmp/yawVel) < (2.0*yawAmp/yawVel):
-                self.desyaw = yawVel*(time.time()-self.startTime-yawDwell+yawAmp/yawVel)%(2.0*yawAmp/yawVel) - yawAmp
-            else:
-                self.desyaw = -yawVel*(time.time()-self.startTime-yawDwell+yawAmp/yawVel)%(2.0*yawAmp/yawVel) - yawAmp 
-            print(self.desyaw)
-
-        elif traj_name == 'Full Rotation':
-            yawVel = 0.5
-            yawDwell = 3.0
-
-            if (time.time()-self.startTime) < yawDwell:
-                self.desyaw = 0.0
-            else:
-                self.desyaw = (yawVel*(time.time()-self.startTime-yawDwell)+math.pi)%(2*math.pi) - math.pi
-
-        elif traj_name == 'Rectangle':
-            # Rectangular path
-            rectPathDwell = 3.0
-            x1 = -0.25 # [m] starting x
-            y1 = -0.25 # [m] starting y
-            x2 = 1.25 # [m] opposite corner x
-            y2 = 0.75 # [m] opposite corner y
-            ta = 4.0 # [s] first leg time
-            tb = 4.0 # [s] second leg time
-            tc = 4.0 # [s] third leg time
-            td = 3.0 # [s] fourth leg time
-            ya = 0.0
-            yb = 3*math.pi/2#math.pi/2
-            yc = 0.0#math.pi
-            yd = math.pi/2#3*math.pi/2
-            tturn = 3.0 # [s] turning time
-            per = ta + tb + tc + td + 4*tturn
-            t = (time.time()-self.startTime-rectPathDwell) % per
-            if time.time()-self.startTime < rectPathDwell: # Dwell
-                self.desx = x1
-                self.desy = y1
-                self.desvx = 0.0
-                self.desvy = 0.0
-                self.desyaw = ya
-            elif t < ta: # First leg
-                self.desx = x1 + (x2-x1)*(t/ta)
-                self.desvx = (x2-x1)/ta
-                self.desy = y1
-                self.desvy = 0.0
-                self.desyaw = ya
-            elif t-ta < tturn: # First Turn
-                self.desx = x2
-                self.desvx = 0.0
-                self.desy = y1
-                self.desvy = 0.0
-                if yb-ya > math.pi:
-                    self.desyaw = ya + (-2*math.pi+yb-ya)*((t-ta)/tturn)
-                elif yb-ya < -math.pi:
-                    self.desyaw = ya + (2*math.pi+yb-ya)*((t-ta)/tturn)
-                else:
-                    self.desyaw = ya + (yb-ya)*((t-ta)/tturn)
-            elif t-ta-tturn < tb: # Second leg
-                self.desx = x2
-                self.desvx = 0.0
-                self.desy = y1 + (y2-y1)*((t-ta-tturn)/tb)
-                self.desvy = (y2-y1)/tb
-                self.desyaw = yb
-            elif t-ta-tb-tturn < tturn: # Second turn
-                self.desx = x2
-                self.desvx = 0.0
-                self.desy = y2
-                self.desvy = 0.0
-                if yc-yb > math.pi:
-                    self.desyaw = yb + (-2*math.pi+yc-yb)*((t-ta-tb-tturn)/tturn)
-                elif yc-yb < -math.pi:
-                    self.desyaw = yb + (2*math.pi+yc-yb)*((t-ta-tb-tturn)/tturn)
-                else:
-                    self.desyaw = yb + (yc-yb)*((t-ta-tb-tturn)/tturn)
-            elif t-ta-tb-2*tturn < tc: # Third leg
-                self.desx = x2 + (x1-x2)*((t-ta-tb-2*tturn)/tc)
-                self.desvx = (x1-x2)/tc
-                self.desy = y2
-                self.desvy = 0.0
-                self.desyaw = yc
-            elif t-ta-tb-tc-2*tturn < tturn: # Third turn
-                self.desx = x1
-                self.desvx = 0.0
-                self.desy = y2
-                self.desvy = 0.0
-                if yd-yc > math.pi:
-                    self.desyaw = yc + (-2*math.pi+yd-yc)*((t-ta-tb-tc-2*tturn)/tturn)
-                elif yd-yc < -math.pi:
-                    self.desyaw = yc + (2*math.pi+yd-yc)*((t-ta-tb-tc-2*tturn)/tturn)
-                else:
-                    self.desyaw = yc + (yd-yc)*((t-ta-tb-tc-2*tturn)/tturn)
-            elif t-ta-tb-tc-3*tturn < td: # Fourth leg
-                self.desx = x1
-                self.desvx = 0.0
-                self.desy = y2 + (y1-y2)*((t-ta-tb-tc-3*tturn)/td)
-                self.desvy = (y1-y2)/td
-                self.desyaw = yd
-            else: # Fourth turn
-                self.desx = x1
-                self.desvx = 0.0
-                self.desy = y1
-                self.desvy = 0.0
-                if ya-yd > math.pi:
-                    self.desyaw = yd + (-2*math.pi+ya-yd)*((t-per+tturn)/tturn)
-                elif ya-yd < -math.pi:
-                    self.desyaw = yd + (2*math.pi+ya-yd)*((t-per+tturn)/tturn)
-                else:
-                    self.desyaw = yd + (ya-yd)*((t-per+tturn)/tturn)
-            #print(self.desx, self.desy, self.desyaw) 
-            #print(self.desvx,self.desvy)
-    '''
 
     def Waypoints(self, pts):
     	# pts: [x, y, psi, vx, vy, retract, extend, duration, options]
@@ -969,7 +611,7 @@ class VRI:
 
 if __name__ == '__main__':
     try:
-        VRI()
+        ORI()
     except KeyboardInterrupt:
         print "\nRecieved Ctrl+C, exiting."
         shared.xb.halt()
