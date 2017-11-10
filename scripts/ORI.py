@@ -22,12 +22,12 @@ import shared_multi as shared # note this is local to this machine
 from velociroach import *
 
 from hall_helpers import *
-import salto_config
+import salto_optitrack_config
 
 EXIT_WAIT = False
 
 # Salto:
-salto_name = 3 # 1: Salto-1P Santa, 2: Salto-1P Rudolph, 3: Salto-1P Dasher
+salto_name = 2 # 1: Salto-1P Santa, 2: Salto-1P Rudolph, 3: Salto-1P Dasher
 
 # Parameters
 alpha_v = 0.5 # velocity first-order low-pass
@@ -45,11 +45,11 @@ step_list = np.array([[1.0,0.0,4.0]])
 # Pre-processing
 off_mat = quaternion_matrix(rot_off)
 if salto_name == 1:
-    mis_mat = salto_config.offsets1
+    mis_mat = salto_optitrack_config.offsets1
 elif salto_name == 2:
-    mis_mat = salto_config.offsets2
+    mis_mat = salto_optitrack_config.offsets2
 elif salto_name == 3:
-    mis_mat = salto_config.offsets3
+    mis_mat = salto_optitrack_config.offsets3
 off_mat = np.dot(off_mat,mis_mat)
 off_mat[0:3,3] = pos_off
 
@@ -263,13 +263,45 @@ class ORI:
 
         waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 60, 80, 3.0, 2]]) # in place
 
-        #'''
+        '''
         # Forwards backwards
         waypts = np.array([
             [-0.3, 0.0, 0.0,    0.0, 0.0, 60, 80, 3.0, 1], # stabilize
             [1.8, 0.0, 0.0,     0.0, 0.0, 60, 80, 4.0, 2], #forwards
             [-0.3, 0.0, 0.0,    0.0, 0.0, 60, 80, 4.0, 2], #backwards
             ])
+        '''
+
+        #'''
+        # D
+        if salto_name == 1:
+            waypts = np.array([
+                [-0.5, -0.8, 0.0,       0.0, 0.0, 65, 78, 3.0, 0], # stabilize
+                [1.5, -0.8, 0.0,        0.5, 0.0, 65, 78, 4.0, 2], # forwards
+                [2.5, 0.2, math.pi/2,   0.0, 0.5, 65, 78, 4.0, 2], # curve
+                [2.5, 1.2, math.pi/2,   0.0, 0.0, 65, 78, 2.0, 2], # straight
+                [2.5, 1.2, math.pi,     0.0, 0.0, 65, 78, 3.0, 2], # turn
+                [-0.5, 1.2, math.pi,    0.0, 0.0, 65, 78, 3.0, 2], # fast
+                [-0.5, 1.2, math.pi,    0.0, 0.0, 65, 78, 2.0, 2], # recover
+                [-0.5, 1.2, math.pi/2,  0.0, 0.0, 65, 78, 3.0, 2], # turn
+                [-0.5, 0.2, math.pi/2, 0.0, 0.0, 65, 78, 2.0, 2], # backwards
+                [-0.5, 0.2, 0.0,       0.0, 0.0, 65, 78, 3.0, 2], # turn
+                [-0.5, 0.2, 0.0,       0.0, 0.0, 70, 78, 3.0, 2]]) # lower
+            waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 65, 78, 3.0, 2]])
+        elif salto_name == 2 or salto_name == 3:
+            waypts = np.array([
+                [-0.5, -0.8, 0.0,       0.0, 0.0, 60, 80, 3.0, 0], # stabilize
+                [1.5, -0.8, 0.0,        0.5, 0.0, 60, 80, 4.0, 2], # forwards
+                [2.5, 0.2, math.pi/2,   0.0, 0.5, 60, 80, 4.0, 2], # curve
+                [2.5, 1.2, math.pi/2,   0.0, 0.0, 60, 80, 2.0, 2], # straight
+                [2.5, 1.2, math.pi,     0.0, 0.0, 60, 80, 3.0, 2], # turn
+                [-0.5, 1.2, math.pi,    0.0, 0.0, 60, 80, 3.0, 2], # fast
+                [-0.5, 1.2, math.pi,    0.0, 0.0, 60, 80, 2.0, 2], # recover
+                [-0.5, 1.2, math.pi/2,  0.0, 0.0, 60, 80, 3.0, 2], # turn
+                [-0.5, 0.2, math.pi/2, 0.0, 0.0, 60, 80, 2.0, 2], # backwards
+                [-0.5, 0.2, 0.0,       0.0, 0.0, 60, 80, 3.0, 2], # turn
+                [-0.5, 0.2, 0.0,       0.0, 0.0, 65, 80, 3.0, 2]]) # lower
+
         #'''
 
         '''

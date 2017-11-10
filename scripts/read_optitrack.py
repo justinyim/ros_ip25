@@ -6,7 +6,7 @@ from tf.transformations import *
 import scipy.io as scio
 import time,sys,os,traceback
 
-import salto_config
+import salto_optitrack_config
 
 rot_off = quaternion_about_axis(0,(1,1,1)) # robot rotation from Vicon body frame
 pos_off = [0.0165,0.07531,-0.04] # coords of the robot origin in the Vicon body frame
@@ -21,11 +21,11 @@ cmdFile = open(outName + "_ctrl.txt", 'w')
 off_mat = quaternion_matrix(rot_off)
 #mis_mat = euler_matrix(-0.03, 0.04, -0.02, 'rxyz')
 if salto_name == '1':
-    mis_mat = salto_config.offsets1
+    mis_mat = salto_optitrack_config.offsets1
 elif salto_name == '2':
-    mis_mat = salto_config.offsets2
+    mis_mat = salto_optitrack_config.offsets2
 elif salto_name == '3':
-    mis_mat = salto_config.offsets3
+    mis_mat = salto_optitrack_config.offsets3
 off_mat = np.dot(off_mat,mis_mat)
 off_mat[0:3,3] = pos_off
 
