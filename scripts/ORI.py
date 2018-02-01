@@ -53,9 +53,42 @@ elif salto_name == 3:
 off_mat = np.dot(off_mat,mis_mat)
 off_mat[0:3,3] = pos_off
 
-k_file = sio.loadmat('/home/justin/Berkeley/FearingLab/Jumper/jumper/8_Bars/salto1p_v_poly_ctrler4b.mat')#salto1p_poly_ctrler1.mat')
-k = k_file['a_nl'].T
-k = np.delete(k, (2), axis = 0)
+#k_file = sio.loadmat('/home/justin/Berkeley/FearingLab/Jumper/Dynamics/3D/Hybrid3D/runGridMotor4.mat')
+#k_file = sio.loadmat('/home/justin/Berkeley/FearingLab/Jumper/robotdata/physicalDeadbeatCurveFit1.mat')
+#k = k_file['a_nl'].T
+
+k = [[   -0.3000,         0,         0],
+[         0,         0,    0.0070],
+[    0.2500,         0,         0],
+[         0,   -0.2500,         0],
+[         0,         0,    0.0392],
+[         0,         0,    0.0065],
+[         0,         0,    0.0113],
+[         0,         0,   -0.0086],
+[         0,         0,   -0.0117],
+[         0,         0,   -0.0261],
+[   -0.0501,         0,         0],
+[    0.0139,         0,         0],
+[         0,   -0.0146,         0],
+[   -0.0122,         0,         0],
+[   -0.0498,         0,         0],
+[         0,    0.0494,         0],
+[    0.0060,         0,         0],
+[         0,         0,    0.0016],
+[   -0.0059,         0,         0],
+[         0,    0.0060,         0],
+[         0,         0,    0.0034],
+[   -0.0032,         0,         0],
+[   -0.0061,         0,         0],
+[         0,   -0.0025,         0],
+[         0,    0.0052,         0],
+[         0,         0,    0.0010],
+[         0,         0,   -0.0009],
+[         0,         0,   -0.0012],
+[         0,         0,   -0.0002],
+[         0,         0,    0.0008],
+[         0,         0,    0.0016]]
+k = np.matrix(k).T
 
 n_steps = len(step_list)
 
@@ -75,6 +108,7 @@ class ORI:
         self.unheard_flag = 0
         self.xbee_sending = 1
         self.MJ_state = 0 # 0: run, 1: stand, 2: stop
+        self.ctrl_mode = 1
 
         # ROS
         self.tf_pub = tf.TransformBroadcaster()
@@ -205,6 +239,11 @@ class ORI:
                 self.telemetry_read = 1
             self.MJ_state = 3
 
+        if data.a == 10:
+            self.ctrl_mode = 0
+        elif data.a == 11:
+            self.ctrl_mode = 1
+
         return 0
 
     def callback(self, data):
@@ -230,6 +269,7 @@ class ORI:
         # Extract relevant robot coordinates
         pos = HR[0:3,3]
         euler_temp = euler_from_matrix(HR, axes='rzxy')
+            # HR = Rz * Rx * Ry
         euler = [euler_temp[0], euler_temp[1], euler_temp[2]]
         self.euler = euler
 
@@ -263,6 +303,15 @@ class ORI:
 
         waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 60, 80, 3.0, 2]]) # in place
 
+        #'''
+        # Forwards backwards
+        waypts = np.array([
+            [-0.2, 0.0, 0.0,    0.0, 0.0, 60, 80, 3.0, 1], # stabilize
+            [1.8, 0.0, 0.0,     0.5, 0.0, 60, 80, 4.0, 3], #forwards
+            [-0.2, 0.0, 0.0,   -0.5, 0.0, 60, 80, 4.0, 3], #backwards
+            ])
+        #'''
+
         '''
         # Forwards backwards
         waypts = np.array([
@@ -272,7 +321,7 @@ class ORI:
             ])
         '''
 
-        #'''
+        '''
         # D
         if salto_name == 1:
             waypts = np.array([
@@ -302,7 +351,7 @@ class ORI:
                 [-0.5, 0.2, 0.0,       0.0, 0.0, 60, 80, 3.0, 2], # turn
                 [-0.5, 0.2, 0.0,       0.0, 0.0, 65, 80, 3.0, 2]]) # lower
 
-        #'''
+        '''
 
         '''
         waypts = np.array([ # circle (Dasher)
@@ -379,7 +428,10 @@ class ORI:
         #'''
         self.Waypoints(waypts)
         #self.Trajectory('Rectangle')
-        ctrl = self.Raibert()
+        if self.ctrl_mode == 0:
+            ctrl = self.Raibert()
+        else:
+            ctrl = self.DeadbeatCurveFit1()
         # self.RaibertInspired()
 
         # ROBOT COMMANDS --------------------------------------------
@@ -425,11 +477,11 @@ class ORI:
             # Printing
             #print(self.step_ind,ctrl[1],ctrl[2],ctrl[3]) # Deadbeat
             #print(self.pos[0],self.pos[1],self.pos[2])
-            print(Cyaw*57/AngleScaling,Croll*57/AngleScaling,CS[0]*57/AngleScaling)
+            ##print(Cyaw*57/AngleScaling,Croll*57/AngleScaling,CS[0]*57/AngleScaling)
             #print(euler[0]*57,euler[1]*57,euler[2]*57)
             #print([ES[0], ES[1], ES[2], Cyaw, Croll, CS[0]])
             #print(Cyaw, Croll, CS[0], CS[1], CS[2]) # Commands
-            #print(Croll,ctrl[1],ctrl[2],ctrl[3]) # cmds before scaling
+            print(ctrl[0],ctrl[1],ctrl[2],ctrl[3]) # cmds before scaling
             #print(np.hstack((ctrl.T, [self.acc])))
             #print(self.desx, self.desvx) # Raibert position
             #print(57*ES[0]/AngleScaling, 57*ES[1]/AngleScaling, 57*ES[2]/AngleScaling)
@@ -551,8 +603,11 @@ class ORI:
             self.desx = ptDx[0]*T/dur + ptx0[0]
             self.desy = ptDx[1]*T/dur + ptx0[1]
             self.desyaw = ptDx[2]*T/dur + ptx0[2]
-            self.desvx = pts[self.ind,3]
-            self.desvy = pts[self.ind,4]
+            velInd = self.ind
+            if velInd == n_pts:
+                velInd = 1
+            self.desvx = pts[velInd,3]
+            self.desvy = pts[velInd,4]
             self.desax = 0.0
             self.desay = 0.0
         else: # normal point
@@ -640,6 +695,57 @@ class ORI:
 
         return ctrl
     '''
+
+    def DeadbeatCurveFit1(self):
+        # 3D deadbeat controller
+        desvz = 3.27#3.5 # TODO make desvz into a parameter
+        ext = 80 # TODO make ext a parameter
+
+        errx = self.pos[0]-self.desx
+        erry = self.pos[1]-self.desy
+        des_t = 2*desvz/9.81
+        self.desvx = self.desvx - errx/des_t
+        self.desvy = self.desvy - erry/des_t
+
+        vh = (self.vel[0]**2 + self.vel[1]**2)**0.5
+        vv = min(self.vel[2], -2)
+        heading = math.atan2(self.vel[1], self.vel[0])
+        vxo = math.cos(heading)*self.desvx + math.sin(heading)*self.desvy
+        vyo = -math.sin(heading)*self.desvx + math.cos(heading)*self.desvy
+        vzo = desvz # TODO: make this into a parameters
+
+        x = np.array([vh,vv,vxo,vyo,vzo]);
+
+        x2 = np.hstack((x,
+            x**2,
+            x[0]*x[1], x[2]*x[1], x[3]*x[1],
+            x[0]*x[4], x[2]*x[4], x[3]*x[4],
+            x**3,
+            x[0]*x[3]**2, x[2]*x[3]**2, x[0]**2*x[3], x[2]**2*x[3],
+            x[0]**2*x[1], x[2]**2*x[1], x[3]**2*x[1],
+            x[0]**2*x[4], x[2]**2*x[4], x[3]**2*x[4]))
+        prl = k.dot(x2)
+
+        prl = prl.T
+
+        R1 = euler_matrix(heading, prl[1], prl[0], 'rzxy')
+        euler1 = euler_from_matrix(R1, 'rxyz')
+        roll = euler1[0]
+        pitch = euler1[1]
+
+        l = prl[2] + 0.2338 - 0.1 # add grid search mean and subtract offset
+        crank = 2.034*10**5*l**5 - 6.661*10**4*l**4 + 7215*l**3 - 141.8*l**2 + 1.632*l + 0.03071 
+        # calculate crank angle from foot extension
+        motor = 25*crank # motor angle from crank angle and gear ratio
+
+        motor = min(max(motor, 50),80)
+        roll = min(max(roll, -math.pi/6), math.pi/6)
+        pitch = min(max(pitch, -math.pi/4), math.pi/4)
+
+        ctrl = [roll,pitch,motor,ext] #TODO make ext a parameter
+
+        return ctrl
+
 
 if __name__ == '__main__':
     try:
