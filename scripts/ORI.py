@@ -27,11 +27,11 @@ import salto_optitrack_config
 EXIT_WAIT = False
 
 # Salto:
-salto_name = 2 # 1: Salto-1P Santa, 2: Salto-1P Rudolph, 3: Salto-1P Dasher
+salto_name = 3 # 1: Salto-1P Santa, 2: Salto-1P Rudolph, 3: Salto-1P Dasher
 
 # Parameters
-alpha_v = 0.5 # velocity first-order low-pass
-alpha_a = 0.1 # acceleration first-order low-pass
+alpha_v = 0.8 # velocity first-order low-pass
+alpha_a = 0.6 # acceleration first-order low-pass
 dt = 0.01#(1.0/120.0)# 0.01 # Optitrack frame time step
 rot_off = quaternion_about_axis(0,(1,1,1)) # robot rotation from Vicon body frame
 pos_off = [0.0165,0.07531,-0.04] # coords of the robot origin in the Vicon body frame
@@ -39,8 +39,6 @@ pos_off = [0.0165,0.07531,-0.04] # coords of the robot origin in the Vicon body 
 #[0.0165,0.07531,-0.00587]
 
 decimate_factor = 1
-
-step_list = np.array([[1.0,0.0,4.0]])
 
 # Pre-processing
 off_mat = quaternion_matrix(rot_off)
@@ -57,6 +55,7 @@ off_mat[0:3,3] = pos_off
 #k_file = sio.loadmat('/home/justin/Berkeley/FearingLab/Jumper/robotdata/physicalDeadbeatCurveFit1.mat')
 #k = k_file['a_nl'].T
 
+#'''
 k = [[   -0.3000,         0,         0],
 [         0,         0,    0.0070],
 [    0.2500,         0,         0],
@@ -89,18 +88,87 @@ k = [[   -0.3000,         0,         0],
 [         0,         0,    0.0008],
 [         0,         0,    0.0016]]
 k = np.matrix(k).T
+#'''
 
-n_steps = len(step_list)
+'''
+k = [[   -0.3000,         0,         0],
+[         0,         0,    0.0070],
+[    0.2500,         0,         0],
+[         0,   -0.2500,         0],
+[         0,         0,    0.0392],
+[         0,         0,    0.0000],
+[         0,         0,    0.0000],
+[         0,         0,   -0.0000],
+[         0,         0,   -0.0000],
+[         0,         0,   -0.0000],
+[   -0.0000,         0,         0],
+[    0.0000,         0,         0],
+[         0,   -0.0000,         0],
+[   -0.0000,         0,         0],
+[   -0.0000,         0,         0],
+[         0,    0.0000,         0],
+[    0.0000,         0,         0],
+[         0,         0,    0.0000],
+[   -0.0000,         0,         0],
+[         0,    0.0000,         0],
+[         0,         0,    0.0000],
+[   -0.0000,         0,         0],
+[   -0.0000,         0,         0],
+[         0,   -0.0000,         0],
+[         0,    0.0000,         0],
+[         0,         0,    0.0000],
+[         0,         0,   -0.0000],
+[         0,         0,   -0.0000],
+[         0,         0,   -0.0000],
+[         0,         0,    0.0000],
+[         0,         0,    0.0000]]
+k = np.matrix(k).T
+'''
 
 class ORI:
     def __init__(self):
         # Robot position variables
-        self.pos = np.array([0,0,0])
-        self.vel = np.array([0,0,0])
-        self.acc = np.array([0,0,0])
+        self.pos = np.matrix([[0],[0],[0]])
+        self.vel = np.matrix([[0],[0],[0]])
+        self.acc = np.matrix([[0],[0],[0]])
         self.euler = np.array([0,0,0])
         self.step_ind = 0
         self.last_step = time.time()
+
+        # Position Kalman filter
+        self.F = np.matrix([
+            [1, 0, 0, dt, 0, 0],
+            [0, 1, 0, 0, dt, 0],
+            [0, 0, 1, 0, 0, dt],
+            [0, 0, 0, 1, 0, 0],
+            [0, 0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 0, 1]])
+        self.Q = np.matrix([
+            [0.3*dt, 0, 0, 0, 0, 0],
+            [0, 0.3*dt, 0, 0, 0, 0],
+            [0, 0, 0.3*dt, 0, 0, 0],
+            [0, 0, 0, 5*dt, 0, 0],
+            [0, 0, 0, 0, 5*dt, 0],
+            [0, 0, 0, 0, 0, 5*dt]])
+        self.H = np.matrix([
+            [1, 0, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0]])
+        self.R = np.matrix([
+            [0.003, 0, 0],
+            [0, 0.003, 0],
+            [0, 0, 0.003]])
+        self.P_init = np.matrix([
+            [0.01, 0, 0, 0, 0, 0],
+            [0, 0.01, 0, 0, 0, 0],
+            [0, 0, 0.01, 0, 0, 0],
+            [0, 0, 0, 10, 0, 0],
+            [0, 0, 0, 0, 10, 0],
+            [0, 0, 0, 0, 0, 10]])
+        self.x = np.matrix([0,0,0,0,0,0]).T
+        self.P = self.P_init
+
+
 
         # Flags and counters
         self.decimate_count = 0
@@ -267,7 +335,7 @@ class ORI:
         HR = HV.dot(off_mat) # Vicon to robot
 
         # Extract relevant robot coordinates
-        pos = HR[0:3,3]
+        pos = np.mat(HR[0:3,3]).T
         euler_temp = euler_from_matrix(HR, axes='rzxy')
             # HR = Rz * Rx * Ry
         euler = [euler_temp[0], euler_temp[1], euler_temp[2]]
@@ -280,12 +348,33 @@ class ORI:
         if self.unheard_flag == 0: # first message
             self.unheard_flag = 1
             self.pos = pos
+            self.x = np.vstack((pos,0,0,0))
             #rospy.loginfo(rospy.get_caller_id() + ' FIRST CONTACT ')
         else: # subsequent messages after the first
             vel = (pos - self.pos)/dt
             acc = (vel - self.vel)/dt
-            self.pos = pos
-            self.vel = alpha_v*vel + (1-alpha_v)*self.vel
+
+            if (time.time() - self.last_step) > 0.3:
+                # Kalman predict step
+                self.x = self.F.dot(self.x) + np.matrix([0,0,0,0,0,-9.81*dt]).T
+                self.P = self.F.dot(self.P.dot(self.F.T)) + self.Q
+
+                # Kalman update step
+                innovation = pos - self.H.dot(self.x)
+                KalmanGain = self.P.dot(self.H.T).dot(np.linalg.inv(self.H.dot(self.P.dot(self.H.T))) + self.R)
+                self.x = self.x + KalmanGain*innovation
+                self.P = self.P - KalmanGain.dot(self.H.dot(self.P))
+
+                self.pos = self.x[0:3]
+                self.vel = self.x[3:6]
+
+            else:
+                self.pos = pos
+                self.vel = alpha_v*vel + (1-alpha_v)*self.vel
+
+                self.x = np.vstack((pos, self.vel))
+                self.P = self.P_init
+
             self.acc = alpha_a*acc + (1-alpha_a)*self.acc
             #rospy.loginfo(rospy.get_caller_id() + ' ' + np.array_str(vel))
         
@@ -293,24 +382,54 @@ class ORI:
 
         # Sequence steps
         #   simple test: acceleration magnitude threshold for ground contact
-        if (self.acc[2] > 2*9.81 or abs(self.acc[0]) > 5 or abs(self.acc[1]) > 5): 
+        if (self.acc[2,0] > 6*9.81  ):  # or abs(self.acc[0]) > 5 or abs(self.acc[1]) > 5): 
             if (time.time() - self.last_step) > 0.3:
                 self.step_ind += 1
-            self.last_step = time.time()
+                self.last_step = time.time()
+
+
+        # DEADBEAT --------------------------------------------------
+        footpts = np.array([
+            [0.0, 0.0, 0.0,     3.27, 80, 0],
+            [0.0, 0.0, 0.0,     3.27, 80, 0],
+            [0.0, 0.0, 0.0,     3.27, 80, 0],
+            [0.6, 0.0, 0.0,     3.27, 80, 0],
+            [1.2, 0.0, 0.0,     3.27, 80, 0],
+            [1.8, 0.0, 0.0,     3.27, 80, 0],
+            [1.2, 0.0, 0.0,     3.27, 80, 0],
+            [0.6, 0.0, 0.0,     3.27, 80, 0],
+            [0.0, 0.0, 0.0,     3.27, 80, 0],
+            ])
 
         # HOPPING ---------------------------------------------------
         # ctrl = self.Deadbeat()
 
-        waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 60, 80, 3.0, 2]]) # in place
+        #waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 60, 80, 3.0, 2]]) # in place
 
-        #'''
-        # Forwards backwards
+        
+        #waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 3.27, 80, 3.0, 2]]) # in place deadbeat
+        steppts = np.array([[0.0, 0.0, 3.27, 0.0, 0]])
+
+        
+        '''
+        # Forwards backwards deadbeat
         waypts = np.array([
-            [-0.2, 0.0, 0.0,    0.0, 0.0, 60, 80, 3.0, 1], # stabilize
-            [1.8, 0.0, 0.0,     0.5, 0.0, 60, 80, 4.0, 3], #forwards
-            [-0.2, 0.0, 0.0,   -0.5, 0.0, 60, 80, 4.0, 3], #backwards
+            [0.0, 0.0, 0.0,     0.0, 0.0, 3.27, 80, 3.0, 1], # stabilize
+            [1.8, 0.0, 0.0,     0.9, 0.0, 3.27, 80, 2.0, 3], #forwards
+            [0.0, 0.0, 0.0,    -0.9, 0.0, 3.27, 80, 2.0, 3], #backwards
             ])
-        #'''
+        '''
+
+        '''
+        # Box deadbeat
+        waypts = np.array([
+            [-0.6, -0.6, 0.0,   0.0, 0.0, 3.68, 80, 3.0, 1], # stabilize
+            [1.8, -0.6, 0.0,    0.8, 0.0, 3.68, 80, 3, 3], #forwards
+            [1.8, 0.6, 0.0,     0.0, 0.4, 3.68, 80, 3, 3], #left
+            [-0.6, 0.6, 0.0,   -0.8, 0.0, 3.68, 80, 3, 3], #backwards
+            [-0.6, -0.6, 0.0,   0.0, -0.4, 3.68, 80, 3, 3], #right
+            ])
+        '''
 
         '''
         # Forwards backwards
@@ -319,7 +438,7 @@ class ORI:
             [1.8, 0.0, 0.0,     0.0, 0.0, 60, 80, 4.0, 2], #forwards
             [-0.3, 0.0, 0.0,    0.0, 0.0, 60, 80, 4.0, 2], #backwards
             ])
-        '''
+        #'''
 
         '''
         # D
@@ -426,7 +545,8 @@ class ORI:
                 [-0.3, -0.3, 0.0,       0.0, 0.0, 63, 80, 4.0, 0],
                 [-0.3, -0.3, 0.0,       0.0, 0.0, 67, 80, 3.0, 0]]) # slow down
         #'''
-        self.Waypoints(waypts)
+        #self.Waypoints(waypts)
+        self.Steppoints(steppts)
         #self.Trajectory('Rectangle')
         if self.ctrl_mode == 0:
             ctrl = self.Raibert()
@@ -481,11 +601,14 @@ class ORI:
             #print(euler[0]*57,euler[1]*57,euler[2]*57)
             #print([ES[0], ES[1], ES[2], Cyaw, Croll, CS[0]])
             #print(Cyaw, Croll, CS[0], CS[1], CS[2]) # Commands
-            print(ctrl[0],ctrl[1],ctrl[2],ctrl[3]) # cmds before scaling
+            #print(ctrl[0],ctrl[1],ctrl[2],ctrl[3]) # cmds before scaling
             #print(np.hstack((ctrl.T, [self.acc])))
             #print(self.desx, self.desvx) # Raibert position
             #print(57*ES[0]/AngleScaling, 57*ES[1]/AngleScaling, 57*ES[2]/AngleScaling)
             #print "pos: %3.2f %3.2f %3.2f \tvel: %3.2f %3.2f \tacc: %3.2f %3.2f" % (self.desx, self.desy, self.desyaw, self.desvx, self.desvy, self.desax, self.desay)
+
+            #print(int(self.acc[2]), self.step_ind, self.last_step)
+            print(self.step_ind, ctrl[0], ctrl[1], ctrl[2], ctrl[3])
 
             # Publish commands
             self.ctrl_pub_rol.publish(Croll)
@@ -515,13 +638,23 @@ class ORI:
         x = np.array([data.position.x,data.position.y,data.position.z,data.orientation.w, data.orientation.x,data.orientation.y,data.orientation.z,t])
         self.tf_pub.sendTransform((x[4], x[5], x[6]), (x[0], x[1], x[2], x[3]), rospy.Time.now(), "jumper", "world")
 
-        '''
-        self.step_ind += 1
-        if self.step_ind > 100:
-            self.step_ind = 0
 
-        self.R1.setServo(-self.step_ind*0.005-0.4)
-        '''
+    def Steppoints(self, pts): 
+        # pts: [x, y, vz, psi, options]
+
+        n_pts = pts.shape[0]
+
+        if (self.step_ind == n_pts):
+            self.step_ind = n_pts-1
+
+        self.desx = pts[self.step_ind, 0]
+        self.desy = pts[self.step_ind, 1]
+        self.params.phase[0] = pts[self.step_ind, 2]
+        self.desyaw = pts[self.step_ind, 3]
+
+        self.desvx = 0
+        self.desvy = 0
+
 
     def Waypoints(self, pts):
     	# pts: [x, y, psi, vx, vy, retract, extend, duration, options]
@@ -623,7 +756,7 @@ class ORI:
         # next waypoint index
         if (T >= dur):
             if (option == 2 or option == 3) and \
-                not(self.vel[2] < 0.5 and self.vel[2] > -0.5 and self.acc[2] < 0): 
+                not(self.vel[2,0] < 0.5 and self.vel[2,0] > -0.5 and self.acc[2,0] < 0): 
                 return # requires start from apex
                 # TODO: this seems like a hack
 
@@ -655,8 +788,8 @@ class ORI:
 
         # Desired velocities
         RB = np.matrix([[np.cos(self.euler[0]),np.sin(self.euler[0])],[-np.sin(self.euler[0]),np.cos(self.euler[0])]])
-        Berr = np.dot(RB,[[self.pos[0]-self.desx],[self.pos[1]-self.desy]])
-        Bv = np.dot(RB,[[self.vel[0]],[self.vel[1]]])
+        Berr = np.dot(RB,[[self.pos[0,0]-self.desx],[self.pos[1]-self.desy]])
+        Bv = np.dot(RB,[[self.vel[0,0]],[self.vel[1]]])
         Bvdes = np.dot(RB,[[self.desvx],[self.desvy]])
         Bades = np.dot(RB,[[self.desax],[self.desay]])
         vxdes = -KPx*Berr[0] + KV*Bvdes[0]
@@ -698,20 +831,20 @@ class ORI:
 
     def DeadbeatCurveFit1(self):
         # 3D deadbeat controller
-        desvz = 3.27#3.5 # TODO make desvz into a parameter
-        ext = 80 # TODO make ext a parameter
+        desvz = self.params.phase[0] #3.67#3.27#3.5
+        ext = self.params.phase[1] 
 
-        errx = self.pos[0]-self.desx
-        erry = self.pos[1]-self.desy
+        errx = self.pos[0,0]-self.desx
+        erry = self.pos[1,0]-self.desy
         des_t = 2*desvz/9.81
-        self.desvx = self.desvx - errx/des_t
-        self.desvy = self.desvy - erry/des_t
+        desvx = self.desvx - errx/des_t
+        desvy = self.desvy - erry/des_t
 
-        vh = (self.vel[0]**2 + self.vel[1]**2)**0.5
-        vv = min(self.vel[2], -2)
-        heading = math.atan2(self.vel[1], self.vel[0])
-        vxo = math.cos(heading)*self.desvx + math.sin(heading)*self.desvy
-        vyo = -math.sin(heading)*self.desvx + math.cos(heading)*self.desvy
+        vh = (self.vel[0,0,]**2 + self.vel[1,0]**2)**0.5
+        vv = min(self.vel[2,0], -2)
+        heading = math.atan2(self.vel[1,0], self.vel[0,0])
+        vxo = math.cos(heading)*desvx + math.sin(heading)*desvy
+        vyo = -math.sin(heading)*desvx + math.cos(heading)*desvy
         vzo = desvz # TODO: make this into a parameters
 
         x = np.array([vh,vv,vxo,vyo,vzo]);
@@ -738,11 +871,11 @@ class ORI:
         # calculate crank angle from foot extension
         motor = 25*crank # motor angle from crank angle and gear ratio
 
-        motor = min(max(motor, 50),80)
+        motor = min(max(motor, 55),80)
         roll = min(max(roll, -math.pi/6), math.pi/6)
         pitch = min(max(pitch, -math.pi/4), math.pi/4)
 
-        ctrl = [roll,pitch,motor,ext] #TODO make ext a parameter
+        ctrl = [roll,pitch,motor,ext]
 
         return ctrl
 
