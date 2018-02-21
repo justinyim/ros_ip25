@@ -37,6 +37,7 @@ rot_off = quaternion_about_axis(0,(1,1,1)) # robot rotation from Vicon body fram
 pos_off = [0.0165,0.07531,-0.04] # coords of the robot origin in the Vicon body frame
 #[0.00587, 0.0165, -0.07531]
 #[0.0165,0.07531,-0.00587]
+yaw_rate = 0.8 # yaw rate in rad/s
 
 decimate_factor = 1
 
@@ -56,38 +57,43 @@ off_mat[0:3,3] = pos_off
 #k = k_file['a_nl'].T
 
 #'''
-k = [[   -0.3000,         0,         0],
-[         0,         0,    0.0070],
-[    0.2500,         0,         0],
-[         0,   -0.2500,         0],
-[         0,         0,    0.0392],
-[         0,         0,    0.0065],
-[         0,         0,    0.0113],
-[         0,         0,   -0.0086],
-[         0,         0,   -0.0117],
-[         0,         0,   -0.0261],
-[   -0.0501,         0,         0],
-[    0.0139,         0,         0],
-[         0,   -0.0146,         0],
-[   -0.0122,         0,         0],
-[   -0.0498,         0,         0],
-[         0,    0.0494,         0],
-[    0.0060,         0,         0],
-[         0,         0,    0.0016],
-[   -0.0059,         0,         0],
-[         0,    0.0060,         0],
-[         0,         0,    0.0034],
-[   -0.0032,         0,         0],
-[   -0.0061,         0,         0],
-[         0,   -0.0025,         0],
-[         0,    0.0052,         0],
-[         0,         0,    0.0010],
-[         0,         0,   -0.0009],
-[         0,         0,   -0.0012],
+k = [[   -0.2080,         0,         0], # Gains now modified from runGridMotor10.mat
+[         0,         0,    -0.0143],
+[    0.0780,         0,         0],
+[         0,   -0.0840,         0],
+[         0,         0,   -0.0201],
+[         0,         0,    0.0022],
 [         0,         0,   -0.0002],
+[         0,         0,   -0.0022],
+[         0,         0,   -0.0017],
+[         0,         0,    0.0031],
+[   -0.0385,         0,         0],
+[    0.0196,         0,         0],
+[         0,   -0.0199,         0],
+[   -0.0052,         0,         0],
+[   -0.0400,         0,         0],
+[         0,    0.0413,         0],
+[    0.0030,         0,         0],
 [         0,         0,    0.0008],
-[         0,         0,    0.0016]]
+[   -0.0036,         0,         0],
+[         0,    0.0053,         0],
+[         0,         0,    0.0043],
+[   -0.0030,         0,         0],
+[   -0.0040,         0,         0],
+[         0,   -0.0007,         0],
+[         0,    0.0023,         0],
+[         0,         0,    0.0004],
+[         0,         0,   -0.0004],
+[         0,         0,   -0.0006],
+[         0,         0,   -0.0001],
+[         0,         0,    0.0002],
+[         0,         0,    0.0005]]
 k = np.matrix(k).T
+
+x_op = np.array([0, -3.3, 0, 0, 3.3]) # Operating (equilibrium) point state
+u_op = np.array([0, 0, 0.24]) # Operating point equilibrium control input
+
+usePlatform = 1
 #'''
 
 '''
@@ -135,6 +141,10 @@ class ORI:
         self.step_ind = 0
         self.last_step = time.time()
 
+        # Platform position variables
+        self.platPos = np.matrix([[0],[0],[0]])
+        self.platTrans = np.matrix([[1, 0, 0 ,0],[0, 1, 0 ,0],[0, 0, 0, 1],[0, 0, 0, 1]])
+
         # Position Kalman filter
         self.F = np.matrix([
             [1, 0, 0, dt, 0, 0],
@@ -176,7 +186,7 @@ class ORI:
         self.unheard_flag = 0
         self.xbee_sending = 1
         self.MJ_state = 0 # 0: run, 1: stand, 2: stop
-        self.ctrl_mode = 1
+        self.ctrl_mode = 1 # 0: Raibert, 1: deadbeat curve fit
 
         # ROS
         self.tf_pub = tf.TransformBroadcaster()
@@ -199,7 +209,11 @@ class ORI:
         self.desay = 0.0
         self.desyaw = 0.0
         self.startTime = time.time()
-        
+        self.stepOpt = 0
+
+        self.landz = 0.0
+        self.nextz = 0.0
+
         self.ind = 0
         self.wpT = time.time()
 
@@ -210,8 +224,8 @@ class ORI:
                 # Motor gains format:
         #  [ Kp , Ki , Kd , Kaw , Kff     ,  Kp , Ki , Kd , Kaw , Kff ]
         #    ----------LEFT----------        ---------_RIGHT----------
-        motorgains = [160,0,30,0,0,0,0,0,0,0]
-        thrustgains = [170,0,120,170,0,120]
+        motorgains = [190,0,30,0,0, 0,0,0,0,0]
+        thrustgains = [220,0,150,170,0,140]
         # roll kp, ki, kd; yaw kp, ki, kd
 
         duration = 5000
@@ -243,6 +257,10 @@ class ORI:
         # BEGIN -----------------------
         rospy.init_node('ORI')
         rospy.Subscriber('Robot_1/pose', Pose, self.callback)
+
+        if usePlatform:
+            rospy.Subscriber('Body_2/pose', Pose, self.callbackPlatform)
+
         s = rospy.Service('MJ_state_server',MJstate,self.handle_MJ_state)
 
         # Initiate telemetry recording; the robot will begin recording immediately when cmd is received.
@@ -314,6 +332,19 @@ class ORI:
 
         return 0
 
+    def callbackPlatform(self, data):
+        rot = data.orientation
+        tr = data.position
+        q = np.array([rot.x, rot.y, rot.z, rot.w])
+        pos = np.array([tr.x, tr.y, tr.z])
+
+        # Convert to homogeneous coordinates
+        HV = quaternion_matrix(q)
+        HV[0:3,3] = pos # Vicon to markers
+
+        self.platPos = np.matrix([[tr.x],[tr.y],[tr.z]])
+        self.platTrans = HV
+
     def callback(self, data):
         # Process Vicon data and send commands
         self.decimate_count += 1
@@ -354,7 +385,7 @@ class ORI:
             vel = (pos - self.pos)/dt
             acc = (vel - self.vel)/dt
 
-            if (time.time() - self.last_step) > 0.3:
+            if (time.time() - self.last_step) > 0.1:
                 # Kalman predict step
                 self.x = self.F.dot(self.x) + np.matrix([0,0,0,0,0,-9.81*dt]).T
                 self.P = self.F.dot(self.P.dot(self.F.T)) + self.Q
@@ -389,26 +420,354 @@ class ORI:
 
 
         # DEADBEAT --------------------------------------------------
-        footpts = np.array([
-            [0.0, 0.0, 0.0,     3.27, 80, 0],
-            [0.0, 0.0, 0.0,     3.27, 80, 0],
-            [0.0, 0.0, 0.0,     3.27, 80, 0],
-            [0.6, 0.0, 0.0,     3.27, 80, 0],
-            [1.2, 0.0, 0.0,     3.27, 80, 0],
-            [1.8, 0.0, 0.0,     3.27, 80, 0],
-            [1.2, 0.0, 0.0,     3.27, 80, 0],
-            [0.6, 0.0, 0.0,     3.27, 80, 0],
-            [0.0, 0.0, 0.0,     3.27, 80, 0],
+        #waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 3.27, 80, 3.0, 2]]) # in place deadbeat
+        steppts = np.array([[0.0, 0.0, 0.05, 0.0,     3.68, 80, 0]]) # deadbeat step planner in place
+
+        '''
+        # Turn in place
+        steppts = np.array([
+            [-1.0, 0.5, 0.05, 0.0,    3.6, 80, 0],
+            [-1.0, 0.5, 0.05, 0.0,    3.6, 80, 0],
+            [-1.0, 0.5, 0.05, 0.0,    3.6, 80, 0],
+            [-1.0, 0.5, 0.05, 1.5,    3.6, 80, 0],
+            [-1.0, 0.5, 0.05, 3.1,    3.6, 80, 0],
+            [-1.0, 0.5, 0.05, 3.1,    3.6, 80, 0],
+            [-1.0, 0.5, 0.05, 3.1,    3.6, 80, 0],
+            [-1.0, 0.5, 0.05, 3.1,    3.6, 80, 0],
+            [-1.0, 0.5, 0.05, 3.1,    3.6, 80, 0],
+            [-1.0, 0.5, 0.05, 1.5,    3.6, 80, 0],
+            [-1.0, 0.5, 0.05, 0.0,    3.6, 80, 0],
+            [-1.0, 0.5, 0.05, 0.0,    3.6, 80, 0],
             ])
+        '''
+
+        '''
+        steppts = np.array([
+            [-1.0, 0.0, 0.0, 0.05,    3.6, 80, 0],
+            [-1.0, 0.0, 0.0, 0.05,    3.6, 80, 0],
+            [-1.0, 0.0, 0.0, 0.05,    3.6, 80, 0],
+            [-1.0, 0.0, 0.0, 0.19,    3.6, 80, 0],
+            [-0.4, 0.0, 0.0, 0.19,    3.6, 80, 0],
+            [0.2, 0.3, 0.0, 0.19,     3.6, 80, 0],
+            [0.8, 0.0, 0.0, 0.19,     3.6, 80, 0],
+            [1.0, 0.0, 0.0, 0.19,     3.6, 80, 0],
+            [1.6, -0.3, 0.0, 0.19,    3.6, 80, 0],
+            [2.0, -0.3, 0.0, 0.05,    3.6, 80, 0]
+            ])
+        '''
+
+        '''
+        # Random velocity commands
+        steppts = np.array([
+            [0.0, 0.0, 0.05, 0.0,     3.7, 80, 1],
+            [0.0, 0.0, 0.05, 0.0,     3.7, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,     3.7, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,     3.7, 80, 0],
+            [1.29, 0.22, 0.05, 0.0,   3.33, 80, 3],
+            [0.95, -0.32, 0.05, 0.0,  3.70, 80, 3],
+            [-1.15, 0.26, 0.05, 0.0,  3.20, 80, 3],
+            [-0.66, -0.35, 0.05, 0.0, 3.03, 80, 3],
+            [-0.44, 0.19, 0.05, 0.0,  3.74, 80, 3],
+            ])
+        '''
+
+        '''
+        # Random position commands
+        steppts = np.array([
+            [0.0, 0.0, 0.05, 0.0,  3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,  3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,  3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,  3.5, 80, 0],
+            [   0   ,   0   ,   0.05    ,   0   ,   3.5 ,   80  ,   0   ],
+            [   -0.27448    ,   0.198745    ,   0.05    ,   0   ,   2.8383  ,   80  ,   0   ],
+            [   -0.543195   ,   0.39425 ,   0.05    ,   0   ,   3.1812  ,   80  ,   0   ],
+            [   -1.08748    ,   0.4015  ,   0.05    ,   0   ,   3.2035  ,   80  ,   0   ],
+            [   -0.72765    ,   0.42009 ,   0.05    ,   0   ,   3.685   ,   80  ,   0   ],
+            [   -0.34825    ,   0.234208    ,   0.05    ,   0   ,   2.9361  ,   80  ,   0   ],
+            [   0.02055 ,   0.313425    ,   0.05    ,   0   ,   2.8177  ,   80  ,   0   ],
+            [   0.5693  ,   0.324079    ,   0.05    ,   0   ,   3.399   ,   80  ,   0   ],
+            [   0.7317  ,   0.52271 ,   0.05    ,   0   ,   3.7409  ,   80  ,   0   ],
+            [   0.5594  ,   0.217246    ,   0.05    ,   0   ,   3.6073  ,   80  ,   0   ],
+            [   0.33956 ,   0.43951 ,   0.05    ,   0   ,   3.2089  ,   80  ,   0   ],
+            [   0.7333  ,   0.2454589   ,   0.05    ,   0   ,   2.9425  ,   80  ,   0   ],
+            [   1.2841  ,   -0.08502    ,   0.05    ,   0   ,   3.5554  ,   80  ,   0   ],
+            [   0.9773  ,   -0.12623    ,   0.05    ,   0   ,   3.2178  ,   80  ,   0   ],
+            [   0.33502 ,   -0.19386    ,   0.05    ,   0   ,   3.2842  ,   80  ,   0   ],
+            [   -0.10515    ,   -0.30542    ,   0.05    ,   0   ,   3.1455  ,   80  ,   0   ],
+            [   0.40022 ,   -0.46746    ,   0.05    ,   0   ,   3.1417  ,   80  ,   0   ],
+            [   0.29031 ,   -0.34202    ,   0.05    ,   0   ,   2.958   ,   80  ,   0   ],
+            [   0.7911  ,   -0.62313    ,   0.05    ,   0   ,   3.3079  ,   80  ,   0   ],
+            [   0.10754 ,   -0.43884    ,   0.05    ,   0   ,   3.57    ,   80  ,   0   ],
+            [   -0.28975    ,   -0.31366    ,   0.05    ,   0   ,   3.413   ,   80  ,   0   ],
+            [   0.25245 ,   -0.26839    ,   0.05    ,   0   ,   3.792   ,   80  ,   0   ],
+            [   0.14291 ,   -0.36493    ,   0.05    ,   0   ,   3.3379  ,   80  ,   0   ],
+            [   -0.18679    ,   -0.07502    ,   0.05    ,   0   ,   3.3134  ,   80  ,   0   ],
+            [   -0.545152   ,   -0.12512    ,   0.05    ,   0   ,   3.5728  ,   80  ,   0   ],
+            [   -0.69417    ,   -0.36783    ,   0.05    ,   0   ,   3.7419  ,   80  ,   0   ],
+            [   -0.589667   ,   -0.44629    ,   0.05    ,   0   ,   3.0439  ,   80  ,   0   ],
+            [   -0.96512    ,   -0.43143    ,   0.05    ,   0   ,   3.2768  ,   80  ,   0   ],
+            [   -0.597915   ,   -0.1046 ,   0.05    ,   0   ,   3.7321  ,   80  ,   0   ],
+            [   -0.32329    ,   -0.38196    ,   0.05    ,   0   ,   3.7442  ,   80  ,   0   ],
+            [   -0.7391 ,   -0.30762    ,   0.05    ,   0   ,   3.3973  ,   80  ,   0   ],
+            [   -1.24147    ,   -0.67534    ,   0.05    ,   0   ,   3.6486  ,   80  ,   0   ],
+            [   -0.93241    ,   -0.72141    ,   0.05    ,   0   ,   2.8625  ,   80  ,   0   ],
+            [   -0.80649    ,   -0.48216    ,   0.05    ,   0   ,   3.6015  ,   80  ,   0   ],
+            [   -0.75324    ,   -0.6739 ,   0.05    ,   0   ,   3.8088  ,   80  ,   0   ],
+            [   -0.450493   ,   -0.447  ,   0.05    ,   0   ,   2.8757  ,   80  ,   0   ],
+            [   -0.9107 ,   -0.27462    ,   0.05    ,   0   ,   3.5664  ,   80  ,   0   ],
+            [   -0.541598   ,   -0.27335    ,   0.05    ,   0   ,   3.268   ,   80  ,   0   ],
+            [   -0.38113    ,   -0.01674    ,   0.05    ,   0   ,   3.5379  ,   80  ,   0   ],
+            [   -0.34675    ,   -0.16335    ,   0.05    ,   0   ,   3.5744  ,   80  ,   0   ],
+            [   -0.529057   ,   -0.11124    ,   0.05    ,   0   ,   3.7766  ,   80  ,   0   ],
+            [   0.00692 ,   0.200396    ,   0.05    ,   0   ,   3.8329  ,   80  ,   0   ],
+            [   0.36749 ,   -0.0846 ,   0.05    ,   0   ,   2.8034  ,   80  ,   0   ],
+            [   -0.10771    ,   -0.22241    ,   0.05    ,   0   ,   2.8251  ,   80  ,   0   ],
+            [   -0.21282    ,   -0.33243    ,   0.05    ,   0   ,   3.3955  ,   80  ,   0   ],
+            [   0.33836 ,   -0.46273    ,   0.05    ,   0   ,   3.1719  ,   80  ,   0   ],
+            [   0.771   ,   -0.55874    ,   0.05    ,   0   ,   2.9519  ,   80  ,   0   ],
+            [   0.7813  ,   -0.3244 ,   0.05    ,   0   ,   3.2227  ,   80  ,   0   ],
+            [   1.0442  ,   -0.23847    ,   0.05    ,   0   ,   3.2954  ,   80  ,   0   ],
+            [   1.0131  ,   0.02666 ,   0.05    ,   0   ,   2.8918  ,   80  ,   0   ],
+            [   0.7037  ,   -0.01057    ,   0.05    ,   0   ,   3.4463  ,   80  ,   0   ],
+            [   1.209   ,   -0.03124    ,   0.05    ,   0   ,   3.2812  ,   80  ,   0   ],
+            [   0.8329  ,   -0.05575    ,   0.05    ,   0   ,   3.7469  ,   80  ,   0   ],
+            [   0.7873  ,   -0.05704    ,   0.05    ,   0   ,   3.3362  ,   80  ,   0   ],
+            [   0.47026 ,   -0.29989    ,   0.05    ,   0   ,   2.8741  ,   80  ,   0   ],
+            [   1.0638  ,   -0.50377    ,   0.05    ,   0   ,   3.7478  ,   80  ,   0   ],
+            [   1.3946  ,   -0.21253    ,   0.05    ,   0   ,   3.8318  ,   80  ,   0   ],
+            [   0.8248  ,   -0.29642    ,   0.05    ,   0   ,   3.8786  ,   80  ,   0   ],
+            [   1.0214  ,   -0.02727    ,   0.05    ,   0   ,   3.3305  ,   80  ,   0   ],
+            [   0.41627 ,   0.04925 ,   0.05    ,   0   ,   3.0542  ,   80  ,   0   ],
+            [   0.45507 ,   0.208332    ,   0.05    ,   0   ,   3.4682  ,   80  ,   0   ],
+            [   0.5656  ,   0.166689    ,   0.05    ,   0   ,   3.0686  ,   80  ,   0   ],
+            [   0.46513 ,   -0.1798 ,   0.05    ,   0   ,   3.4697  ,   80  ,   0   ],
+            [   0.9953  ,   -0.41397    ,   0.05    ,   0   ,   2.8391  ,   80  ,   0   ],
+            [   1.4378  ,   -0.55893    ,   0.05    ,   0   ,   2.8098  ,   80  ,   0   ],
+            [   0.954   ,   -0.28278    ,   0.05    ,   0   ,   3.7679  ,   80  ,   0   ],
+            [   0.38434 ,   -0.38656    ,   0.05    ,   0   ,   3.4528  ,   80  ,   0   ],
+            [   0.5063  ,   -0.26647    ,   0.05    ,   0   ,   3.5128  ,   80  ,   0   ],
+            [   0.4078  ,   -0.53286    ,   0.05    ,   0   ,   3.6271  ,   80  ,   0   ],
+            [   0.01371 ,   -0.41804    ,   0.05    ,   0   ,   3.7431  ,   80  ,   0   ],
+            [   -0.466679   ,   -0.14522    ,   0.05    ,   0   ,   2.8346  ,   80  ,   0   ],
+            [   -0.07625    ,   0.05017 ,   0.05    ,   0   ,   2.8548  ,   80  ,   0   ],
+            [   -0.01725    ,   0.335102    ,   0.05    ,   0   ,   3.1536  ,   80  ,   0   ],
+            [   0.44118 ,   0.41094 ,   0.05    ,   0   ,   3.6686  ,   80  ,   0   ],
+            [   0.8208  ,   0.1252  ,   0.05    ,   0   ,   3.1115  ,   80  ,   0   ],
+            [   1.0629  ,   0.11704 ,   0.05    ,   0   ,   3.8701  ,   80  ,   0   ],
+            [   1.3799  ,   0.160318    ,   0.05    ,   0   ,   3.1289  ,   80  ,   0   ],
+            [   1.0526  ,   0.41972 ,   0.05    ,   0   ,   3.2915  ,   80  ,   0   ],
+            [   0.57    ,   0.113   ,   0.05    ,   0   ,   3.7456  ,   80  ,   0   ],
+            [   -0.15994    ,   0.42142 ,   0.05    ,   0   ,   3.7899  ,   80  ,   0   ],
+            [   -0.13049    ,   0.189466    ,   0.05    ,   0   ,   2.9956  ,   80  ,   0   ],
+            [   0.10804 ,   0.38121 ,   0.05    ,   0   ,   2.8383  ,   80  ,   0   ],
+            [   0.44206 ,   0.6773  ,   0.05    ,   0   ,   3.1772  ,   80  ,   0   ],
+            [   0.6133  ,   0.58006 ,   0.05    ,   0   ,   3.0381  ,   80  ,   0   ],
+            [   0.9759  ,   0.72136 ,   0.05    ,   0   ,   3.1067  ,   80  ,   0   ],
+            [   1.0734  ,   0.67463 ,   0.05    ,   0   ,   2.9013  ,   80  ,   0   ],
+            [   0.47056 ,   0.66903 ,   0.05    ,   0   ,   3.1061  ,   80  ,   0   ],
+            [   0.27533 ,   0.53949 ,   0.05    ,   0   ,   2.988   ,   80  ,   0   ],
+            [   0.15111 ,   0.66134 ,   0.05    ,   0   ,   3.024   ,   80  ,   0   ],
+            [   0.37333 ,   0.62331 ,   0.05    ,   0   ,   3.2766  ,   80  ,   0   ],
+            [   -0.08723    ,   0.40576 ,   0.05    ,   0   ,   3.4781  ,   80  ,   0   ],
+            [   -0.448835   ,   0.45247 ,   0.05    ,   0   ,   3.8393  ,   80  ,   0   ],
+            [   -0.11169    ,   0.59334 ,   0.05    ,   0   ,   3.8553  ,   80  ,   0   ],
+            [   0.31973 ,   0.67774 ,   0.05    ,   0   ,   3.8428  ,   80  ,   0   ],
+            [   -0.3779 ,   0.49453 ,   0.05    ,   0   ,   3.8853  ,   80  ,   0   ],
+            [   0.01601 ,   0.4767  ,   0.05    ,   0   ,   3.549   ,   80  ,   0   ],
+            [   -0.08677    ,   0.40255 ,   0.05    ,   0   ,   3.0346  ,   80  ,   0   ],
+            [   -0.24522    ,   0.08424 ,   0.05    ,   0   ,   3.3196  ,   80  ,   0   ],
+            [   -0.476971   ,   0.41515 ,   0.05    ,   0   ,   3.411   ,   80  ,   0   ],
+            [   -0.00984    ,   0.35314 ,   0.05    ,   0   ,   3.3082  ,   80  ,   0   ],
+            [   0.43939 ,   0.69126 ,   0.05    ,   0   ,   3.3763  ,   80  ,   0   ],
+            [0.0, 0.0, 0.05, 0.0,  3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,  3.5, 80, 0]
+            ])
+        '''
+
+        '''
+        # Velocity commands
+        steppts = np.array([
+            [0.0, 0.0, 0.05, 0.0,   3.7, 80, 1],
+            [0.0, 0.0, 0.05, 0.0,   3.7, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,   3.7, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,   3.7, 80, 0],
+            [1.0, 0.0, 0.05, 0.0,   3.5, 80, 3],
+            [-0.5, 0.0, 0.05, 0.0,  3.5, 80, 3],
+            [-0.5, 0.0, 0.05, 0.0,  3.9, 80, 3],
+            [0.5, 0.0, 0.05, 0.0,   3.9, 80, 3],
+            [0.5, 0.0, 0.05, 0.0,   3.5, 80, 3],
+            [-1.0, 0.0, 0.05, 0.0,  3.5, 80, 3],
+            [0.0, -0.5, 0.05, 0.0,  3.5, 80, 3],
+            [0.5, 0.0, 0.05, 0.0,   3.5, 80, 3],
+            [0.0, 0.5, 0.05, 0.0,   3.5, 80, 3],
+            [-0.5, 0.0, 0.05, 0.0,  3.5, 80, 3],
+            [0.0, 0.0, 0.05, 0.0,   3.7, 80, 3],
+            ])
+        '''
+
+        #'''
+        # Hop on platform
+        steppts = np.array([
+            [0.0, 0.0, 0.05, 0.0,   3.9, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,   3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,   3.9, 80, 0],
+            [-0.1, 0.0, 0.0, 0.0,   3.5, 80, 2],
+            [-0.1, 0.0, 0.0, 0.0,   3.5, 80, 2],
+            [0.0, 0.0, 0.05, 0.0,   3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,   3.9, 80, 0],
+            [-0.1, 0.0, 0.0, 0.0,   3.5, 80, 2],
+            [-0.1, 0.0, 0.0, 0.0,   3.5, 80, 2],
+            [0.0, 0.0, 0.05, 0.0,   3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,   3.9, 80, 0],
+            [-0.1, 0.0, 0.0, 0.0,   3.5, 80, 2],
+            [-0.1, 0.0, 0.0, 0.0,   3.5, 80, 2],
+            [0.0, 0.0, 0.05, 0.0,   3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,   3.9, 80, 0],
+            [-0.1, 0.0, 0.0, 0.0,   3.5, 80, 2],
+            [-0.1, 0.0, 0.0, 0.0,   3.5, 80, 2],
+            [0.0, 0.0, 0.05, 0.0,   3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,   3.9, 80, 0],
+            [-0.1, 0.0, 0.0, 0.0,   3.5, 80, 2],
+            [-0.1, 0.0, 0.0, 0.0,   3.5, 80, 2],
+            [0.0, 0.0, 0.05, 0.0,   3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,   3.9, 80, 0],
+            [-0.1, 0.0, 0.0, 0.0,   3.5, 80, 2],
+            [-0.1, 0.0, 0.0, 0.0,   3.5, 80, 2],
+            ])
+        #'''
+
+        '''
+        # Hop onto chair and desk
+        steppts = np.array([
+            [-1.00, 0.00, 0.05, 0.00,    3.9, 80, 1],
+            [-1.00, 0.00, 0.05, 0.00,    3.9, 80, 0],
+            [-1.00, 0.00, 0.05, 0.00,    3.9, 80, 0],
+            [-1.00, 0.00, 0.05, 0.00,    3.9, 80, 0],
+            [-0.50, 0.00, 0.05, 0.00,    3.9, 80, 0],
+            [-0.00, 0.00, 0.45, 0.00,    3.9, 80, 0], # up onto chair
+            [-0.00, 0.00, 0.45, 0.00,    3.2, 80, 0], # stabilize
+            [-0.00, 0.00, 0.45, 0.00,    3.7, 80, 0],
+            [-0.00,-0.05, 0.45, 0.00,    3.9, 80, 0],
+            [-0.00,-0.50, 0.77, 0.00,    3.9, 80, 0], # up onto desk
+            [-0.00,-0.50, 0.77, 0.00,    3.2, 80, 0], # stabilize
+            [-0.30,-0.50, 0.77, 0.00,    3.5, 80, 0],
+            [-0.70,-0.50, 0.77, 0.00,    3.9, 80, 0],
+            [-0.70,-0.50, 0.77, 0.00,    3.9, 80, 0],
+            [-0.30,-0.50, 0.77, 0.00,    3.9, 80, 0],
+            [ 0.05,-0.50, 0.77, 0.00,    3.5, 80, 0],
+            [ 0.05,-0.45, 0.77, 0.00,    3.3, 80, 0],
+            [ 0.05,-0.00, 0.45, 0.00,    3.0, 80, 0], # jump down to chair
+            [ 0.05,-0.00, 0.45, 0.00,    3.5, 80, 0], # stabilize
+            [ 0.05,-0.00, 0.45, 0.00,    3.0, 80, 0], # jump down to ground
+            [-0.50, 0.00, 0.05, 0.00,    3.5, 80, 0], # run back
+            [-1.00, 0.00, 0.05, 0.00,    3.5, 80, 0],
+            ])
+        '''
+
+        
+        '''
+        # Box hop
+        steppts = np.array([
+            [-0.5, 0.0, 0.0, 0.05,    3.8, 80, 1],
+            [-0.5, 0.0, 0.0, 0.05,    3.8, 80, 0],
+            [-0.5, 0.0, 0.0, 0.05,    3.8, 80, 0],
+            [-0.5, 0.0, 0.0, 0.05,    3.8, 80, 0],
+            [0.5,  0.0, 0.0, 0.05,    3.8, 80, 0],
+            [0.5, -0.5, 0.0, 0.05,    3.8, 80, 0],
+            [-0.5,-0.5, 0.0, 0.05,    3.8, 80, 0],
+            [-0.5, 0.0, 0.0, 0.05,    3.4, 80, 0],
+            [-0.5, 0.0, 0.0, 0.05,    3.4, 80, 0],
+            [-0.5, 0.0, 0.0, 0.05,    3.4, 80, 0],
+            [0.5,  0.0, 0.0, 0.05,    3.4, 80, 0],
+            [0.5,  0.5, 0.0, 0.05,    3.4, 80, 0],
+            [-0.5, 0.5, 0.0, 0.05,    3.4, 80, 0],
+            ])
+        '''
+
+        '''
+        # Try other right angles
+        steppts = np.array([
+            [-1.0, 0.0, 0.0, 0.05,    3.8, 80, 0],
+            [-1.0, 0.0, 0.0, 0.05,    3.8, 80, 0],
+            [-1.0, 0.0, 0.0, 0.05,    3.8, 80, 0],
+            [0.0, 0.0, 0.0, 0.05,     3.8, 80, 0],
+            [0.5, 0.0, 0.0, 0.05,     3.8, 80, 0],
+            [0.5, 0.5, 0.0, 0.05,     3.8, 80, 0],
+            [0.0, 0.5, 0.0, 0.05,     3.8, 80, 0],
+            [0.3, 0.5, 0.0, 0.05,     3.2, 80, 0],
+            [0.6, 0.5, 0.0, 0.05,     3.2, 80, 0],
+            [0.9, 0.5, 0.0, 0.05,     3.2, 80, 0],
+            [1.2, 0.5, 0.0, 0.05,     3.8, 80, 0],
+            [1.5, 0.5, 0.0, 0.05,     3.8, 80, 0],
+            [1.8, 0.5, 0.0, 0.05,     3.2, 80, 0]
+            ])
+        '''
+
+        '''
+        # Too hard because of right angle turns
+        steppts = np.array([
+            [-1.0, 0.0, 0.0, 0.05,    3.8, 80, 0],
+            [-1.0, 0.0, 0.0, 0.05,    3.8, 80, 0],
+            [-1.0, 0.0, 0.0, 0.05,    3.8, 80, 0],
+            [-0.5, 0.0, 0.0, 0.05,    3.8, 80, 0],
+            [0.5, 0.0, 0.0, 0.05,     3.8, 80, 0],
+            [0.0, 0.0, 0.0, 0.05,     3.8, 80, 0],
+            [0.0, 0.5, 0.0, 0.05,     3.8, 80, 0],
+            [0.3, 0.5, 0.0, 0.05,     3.8, 80, 0],
+            [0.6, 0.5, 0.0, 0.05,     3.2, 80, 0],
+            [0.9, 0.5, 0.0, 0.05,     3.2, 80, 0],
+            [1.2, 0.5, 0.0, 0.05,     3.8, 80, 0],
+            [1.5, 0.5, 0.0, 0.05,     3.8, 80, 0],
+            [1.8, 0.5, 0.0, 0.05,     3.2, 80, 0]
+            ])
+        '''
+
+        '''
+        # Good!
+        steppts = np.array([
+            [-1.0, 0.0, 0.0, 0.05,    3.27, 80, 1],
+            [-1.0, 0.0, 0.0, 0.05,    3.27, 80, 0],
+            [-1.0, 0.0, 0.0, 0.05,    3.27, 80, 0],
+            [-1.0, 0.0, 0.0, 0.05,    3.68, 80, 0],
+            [-1.0, 0.0, 0.0, 0.05,    3.68, 80, 0],
+            [-0.5, 0.0, 0.0, 0.05,    3.68, 80, 0],
+            [0.5, 0.0, 0.0, 0.05,     3.68, 80, 0],
+            [1.5, 0.0, 0.0, 0.05,     3.68, 80, 0],
+            [2.0, 0.0, 0.0, 0.05,     3.27, 80, 0],
+            [2.0, 0.0, 0.0, 0.05,     3.27, 80, 0],
+            [2.0, 0.0, 0.0, 0.05,     3.68, 80, 0],
+            [2.0, 0.0, 0.0, 0.05,     3.68, 80, 0],
+            [1.5, 0.0, 0.0, 0.05,     3.68, 80, 0],
+            [0.5, 0.0, 0.0, 0.05,     3.68, 80, 0],
+            [-0.5, 0.0, 0.0, 0.05,    3.68, 80, 0],
+            ])
+        '''
+
+        '''
+        steppts = np.array([
+            [-0.5, 0.0, 0.0,     3.68, 80, 0],
+            [-0.5, 0.0, 0.0,     3.68, 80, 0],
+            [-0.5, 0.0, 0.0,     3.68, 80, 0],
+            [0.0, 0.0, 0.0,      3.68, 80, 0],
+            [1.5, 0.0, 0.0,      3.68, 80, 0],
+            [1.8, 0.0, 0.0,      3.68, 80, 0],
+            [1.8, 0.0, 0.0,      3.27, 80, 0],
+            [1.8, 0.3, 0.0,      3.27, 80, 0],
+            [1.8, 0.6, 0.0,      3.27, 80, 0],
+            [1.5, 0.6, 0.0,      3.27, 80, 0],
+            [1.2, 0.6, 0.0,      3.27, 80, 0],
+            [0.9, 0.6, 0.0,      3.68, 80, 0],
+            [0.6, 0.6, 0.0,      3.68, 80, 0],
+            [0.3, 0.6, 0.0,      3.27, 80, 0],
+            [0.0, 0.6, 0.0,      3.27, 80, 0],
+            [0.0, 0.6, 0.0,      2.5, 80, 0],
+            ])
+        '''
 
         # HOPPING ---------------------------------------------------
         # ctrl = self.Deadbeat()
 
         #waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 60, 80, 3.0, 2]]) # in place
-
-        
-        #waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 3.27, 80, 3.0, 2]]) # in place deadbeat
-        steppts = np.array([[0.0, 0.0, 3.27, 0.0, 0]])
 
         
         '''
@@ -640,20 +999,74 @@ class ORI:
 
 
     def Steppoints(self, pts): 
-        # pts: [x, y, vz, psi, options]
+        # pts: [x, y, z, psi, vz, ext, options]
+        # options: 
+        #   0: usual format as above
+        #   1: (only first node): loop
+        #   2: jump onto the platform
 
-        n_pts = pts.shape[0]
+        n_pts = pts.shape[0] # number of steps in our list
 
+        # Loop or hold position when we reach the end of the step list
         if (self.step_ind == n_pts):
-            self.step_ind = n_pts-1
+            if (pts[0,6] == 1): # loop and go back to the beginning
+                self.step_ind = 1
+            else: # no loop
+                self.step_ind = n_pts-1
 
-        self.desx = pts[self.step_ind, 0]
-        self.desy = pts[self.step_ind, 1]
-        self.params.phase[0] = pts[self.step_ind, 2]
-        self.desyaw = pts[self.step_ind, 3]
+        # Where do we want to aim after we touch down?
+        ptPlat = np.matrix([[pts[self.step_ind,0]],[pts[self.step_ind,1]],[pts[self.step_ind,2]],[1]])
+        ptPlatGlobal = self.platTrans.dot(ptPlat)
 
-        self.desvx = 0
-        self.desvy = 0
+        if (pts[self.step_ind, 6] == 0 or self.step_ind == 0): # normal jump point
+            self.desx = pts[self.step_ind, 0]
+            self.desy = pts[self.step_ind, 1]
+            self.nextz = pts[self.step_ind, 2]
+            self.stepOpt = 0
+            self.desvx = 0
+            self.desvy = 0
+        elif (pts[self.step_ind, 6] == 2): # jump to the platform
+            self.desx = ptPlatGlobal[0,0]
+            self.desy = ptPlatGlobal[1,0]
+            self.nextz = ptPlatGlobal[2,0]
+            self.stepOpt = 0
+            self.desvx = 0
+            self.desvy = 0
+        elif (pts[self.step_ind, 6] == 3): # velocity command
+            self.desvx = pts[self.step_ind, 0]
+            self.desvy = pts[self.step_ind, 1]
+            self.nextz = pts[self.step_ind, 2]
+            self.stepOpt = 3
+
+
+        # Yaw and desired takeoff velocity
+        self.desyaw = self.desyaw + min(max(pts[self.step_ind, 3]-self.desyaw,-yaw_rate*dt),yaw_rate*dt)
+        if (self.ctrl_mode == 1): # Deadbeat
+            self.params.phase[0] = pts[self.step_ind, 4]
+            self.params.phase[1] = pts[self.step_ind, 5]
+        elif (self.ctrl_mode == 1): # Raibert
+            self.params.phase[0] = 60
+            self.params.phase[1] = 80
+
+        # Where are we going to touch down?
+        if (self.step_ind == 0): # we are at the first point
+            self.landz = pts[0, 2]
+        else:
+            if pts[self.step_ind - 1, 6] == 2: # platform step
+                self.landz = ptPlatGlobal[2,0]
+            else: # normal step
+                self.landz = pts[self.step_ind - 1, 2]
+
+        # Velocities for Raibert control
+        if (self.ctrl_mode == 0): # Raibert control
+            if (self.step_ind == 0): # we are at the first point
+                self.desvx = 0
+                self.desvy = 0
+            else:
+                #des_t = pts[self.step_ind, 4]/9.81 + (2*(self.landz + 0.5*pts[self.step_ind, 4]**2/9.81 - self.nextz)/9.81)**0.5
+                des_t = 0.8
+                self.desvx = (pts[self.step_ind, 0] - pts[self.step_ind -1, 0])/des_t
+                self.desvy = (pts[self.step_ind, 1] - pts[self.step_ind -1, 0])/des_t
 
 
     def Waypoints(self, pts):
@@ -832,48 +1245,83 @@ class ORI:
     def DeadbeatCurveFit1(self):
         # 3D deadbeat controller
         desvz = self.params.phase[0] #3.67#3.27#3.5
-        ext = self.params.phase[1] 
+        ext = self.params.phase[1]
 
-        errx = self.pos[0,0]-self.desx
-        erry = self.pos[1,0]-self.desy
-        des_t = 2*desvz/9.81
-        desvx = self.desvx - errx/des_t
-        desvy = self.desvy - erry/des_t
+        # Ballistic flight phase
+        # (Currently assuming the ground height changes stepwise without slope)
+        # time remain in current flight phase
+        t_pred = self.vel[2,0]/9.81 + (self.vel[2,0]**2 + 2*9.81*max(self.pos[2,0] -0.25 -self.landz ,0))**0.5/9.81
+        # predicted touchdown vertical velocity
+        vv_pred = -(2*(0.5*self.vel[2,0]**2 + max(9.81*(self.pos[2,0] -0.25 -self.landz) ,0)))**0.5
+        x_pred = self.pos[0,0] + t_pred*self.vel[0,0] # predicted x touchdown
+        y_pred = self.pos[1,0] + t_pred*self.vel[1,0] # predicted y touchdown
 
-        vh = (self.vel[0,0,]**2 + self.vel[1,0]**2)**0.5
-        vv = min(self.vel[2,0], -2)
-        heading = math.atan2(self.vel[1,0], self.vel[0,0])
-        vxo = math.cos(heading)*desvx + math.sin(heading)*desvy
-        vyo = -math.sin(heading)*desvx + math.cos(heading)*desvy
-        vzo = desvz # TODO: make this into a parameters
+        # Desired velocities on takeoff
+        if (self.stepOpt == 0):
+            errx = x_pred-self.desx
+            erry = y_pred-self.desy
+            des_t = desvz/9.81 + (2*(self.landz + 0.5*desvz**2/9.81 - self.nextz)/9.81)**0.5
+            desvx = self.desvx - errx/des_t
+            desvy = self.desvy - erry/des_t
+        elif (self.stepOpt == 3):
+            desvx = self.desvx
+            desvy = self.desvy
 
-        x = np.array([vh,vv,vxo,vyo,vzo]);
 
-        x2 = np.hstack((x,
-            x**2,
-            x[0]*x[1], x[2]*x[1], x[3]*x[1],
-            x[0]*x[4], x[2]*x[4], x[3]*x[4],
-            x**3,
-            x[0]*x[3]**2, x[2]*x[3]**2, x[0]**2*x[3], x[2]**2*x[3],
-            x[0]**2*x[1], x[2]**2*x[1], x[3]**2*x[1],
-            x[0]**2*x[4], x[2]**2*x[4], x[3]**2*x[4]))
-        prl = k.dot(x2)
+        if time.time() - self.last_step > 0.05: # Flight phase (normal operation)
 
-        prl = prl.T
+            vh = (self.vel[0,0,]**2 + self.vel[1,0]**2)**0.5 # incoming horizontal velocity
+            vv = vv_pred # incoming vertical velocity
+            heading = math.atan2(self.vel[1,0], self.vel[0,0]) # incoming horizontal velocity heading
+            vxo = math.cos(heading)*desvx + math.sin(heading)*desvy # desired incoming-velocity-frame outgoing longitudinal velocity
+            vyo = -math.sin(heading)*desvx + math.cos(heading)*desvy # desired outgoing lateral velocity in the incoming frame
+            vzo = desvz # TODO: make this into a parameters
 
-        R1 = euler_matrix(heading, prl[1], prl[0], 'rzxy')
-        euler1 = euler_from_matrix(R1, 'rxyz')
-        roll = euler1[0]
-        pitch = euler1[1]
+            vxo = max(min(vxo,2.5),-2.5)
+            vyo = max(min(vyo,1.0),-1.0)
 
-        l = prl[2] + 0.2338 - 0.1 # add grid search mean and subtract offset
+            x = np.array([vh,vv,vxo,vyo,vzo]) - x_op;
+
+            x2 = np.hstack((x,
+                x**2,
+                x[0]*x[1], x[2]*x[1], x[3]*x[1],
+                x[0]*x[4], x[2]*x[4], x[3]*x[4],
+                x**3,
+                x[0]*x[3]**2, x[2]*x[3]**2, x[0]**2*x[3], x[2]**2*x[3],
+                x[0]**2*x[1], x[2]**2*x[1], x[3]**2*x[1],
+                x[0]**2*x[4], x[2]**2*x[4], x[3]**2*x[4]))
+            prl = k.dot(x2) # curve-fit controller
+            prl = prl.T
+
+            # Converting from incoming velocity frame to world frame for touchdown angles
+            R1 = euler_matrix(heading - self.euler[0], prl[0], prl[1], 'rzyx')
+            euler1 = euler_from_matrix(R1, 'ryxz')
+
+            roll = euler1[1] + u_op[0] # roll angle (with added operating point input)
+            pitch = euler1[0] + u_op[1] # pitch angle (with added operating point input)
+            l = prl[2] - 0.1 + u_op[2] # leg length (subtracting offset and adding operating point input)
+
+        else: # Stance phase
+            pitch = math.atan2(desvx, desvz)
+            roll = math.atan2(-desvy, desvz)
+            l = 80
+
+        # Raibert comparison
+        '''
+        xd = max(min(-0.05*self.vel[0,0]/2 + 0.006*(desvx - self.vel[0,0]),l/2),-l/2)
+        pitch = math.sin(xd/l)
+        yd = max(min(0.05*self.vel[1,0]/2 - 0.006*(desvy - self.vel[1,0]),l*math.cos(pitch)/2),-l*math.cos(pitch)/2)
+        roll = math.sin(yd/(l*math.cos(pitch)))
+        l = 0.235 - 0.1
+        '''
+
         crank = 2.034*10**5*l**5 - 6.661*10**4*l**4 + 7215*l**3 - 141.8*l**2 + 1.632*l + 0.03071 
         # calculate crank angle from foot extension
         motor = 25*crank # motor angle from crank angle and gear ratio
 
-        motor = min(max(motor, 55),80)
+        motor = min(max(motor, 52),80)
         roll = min(max(roll, -math.pi/6), math.pi/6)
-        pitch = min(max(pitch, -math.pi/4), math.pi/4)
+        pitch = min(max(pitch, -math.pi/6), math.pi/6)
 
         ctrl = [roll,pitch,motor,ext]
 
