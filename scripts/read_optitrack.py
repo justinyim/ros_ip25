@@ -16,6 +16,7 @@ salto_name = sys.argv[2]
 outName = name[0:19]
 poseFile = open(outName + ".txt", 'w')
 cmdFile = open(outName + "_ctrl.txt", 'w')
+bodyFile = open(outName + "_body.txt", 'w')
 
 # Pre-processing
 off_mat = quaternion_matrix(rot_off)
@@ -51,7 +52,15 @@ for topic, msg, t in rosbag.Bag(name).read_messages():
         
         #print t, pos[0], pos[1], pos[2], euler[0], euler[1], euler[2]
         poseFile.write(str(t) + ", " + str(pos[0]) + ", " + str(pos[1]) + ", " + str(pos[2]) + ", " + str(euler[0]) + ", " + str(euler[1]) + ", " + str(euler[2]) + "\n")
-
+    elif topic == '/Body_2/pose':
+        data = msg
+        
+        # Extract transform from message
+        rot = data.orientation
+        tr = data.position
+        q = np.array([rot.x, rot.y, rot.z, rot.w])
+        pos = np.array([tr.x, tr.y, tr.z])
+        bodyFile.write(str(t) + ", " + str(pos[0]) + ", " + str(pos[1]) + ", " + str(pos[2]) + ", " + str(q[0]) + ", " + str(q[1]) + ", " + str(q[2]) + ", " + str(q[3]) + "\n")
     elif topic == '/control/yaw':
         cmdFile.write(str(t) + ", 1, " + str(msg.data) + "\n")
     elif topic == '/control/rol':
