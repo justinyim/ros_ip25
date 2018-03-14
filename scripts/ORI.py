@@ -144,6 +144,8 @@ class ORI:
         # Platform position variables
         self.platPos = np.matrix([[0],[0],[0]])
         self.platTrans = np.matrix([[1, 0, 0 ,0],[0, 1, 0 ,0],[0, 0, 0, 1],[0, 0, 0, 1]])
+        self.platPos2 = np.matrix([[0],[0],[0]])
+        self.platTrans2 = np.matrix([[1, 0, 0 ,0],[0, 1, 0 ,0],[0, 0, 0, 1],[0, 0, 0, 1]])
 
         # Position Kalman filter
         self.F = np.matrix([
@@ -186,7 +188,7 @@ class ORI:
         self.unheard_flag = 0
         self.xbee_sending = 1
         self.MJ_state = 0 # 0: run, 1: stand, 2: stop
-        self.ctrl_mode = 1 # 0: Raibert, 1: deadbeat curve fit
+        self.ctrl_mode = 2 # 0: Raibert, 1: deadbeat curve fit, 2: Raibert velocity
 
         # ROS
         self.tf_pub = tf.TransformBroadcaster()
@@ -224,8 +226,8 @@ class ORI:
                 # Motor gains format:
         #  [ Kp , Ki , Kd , Kaw , Kff     ,  Kp , Ki , Kd , Kaw , Kff ]
         #    ----------LEFT----------        ---------_RIGHT----------
-        motorgains = [190,0,30,0,0, 0,0,0,0,0]
-        thrustgains = [220,0,150,170,0,140]
+        motorgains = [140,0,20,0,0, 0,0,0,0,0]
+        thrustgains = [210,0,160,160,0,140]
         # roll kp, ki, kd; yaw kp, ki, kd
 
         duration = 5000
@@ -260,6 +262,7 @@ class ORI:
 
         if usePlatform:
             rospy.Subscriber('Body_2/pose', Pose, self.callbackPlatform)
+            rospy.Subscriber('Body_3/pose', Pose, self.callbackPlatform2)
 
         s = rospy.Service('MJ_state_server',MJstate,self.handle_MJ_state)
 
@@ -344,6 +347,19 @@ class ORI:
 
         self.platPos = np.matrix([[tr.x],[tr.y],[tr.z]])
         self.platTrans = HV
+
+    def callbackPlatform2(self, data):
+        rot = data.orientation
+        tr = data.position
+        q = np.array([rot.x, rot.y, rot.z, rot.w])
+        pos = np.array([tr.x, tr.y, tr.z])
+
+        # Convert to homogeneous coordinates
+        HV = quaternion_matrix(q)
+        HV[0:3,3] = pos # Vicon to markers
+
+        self.platPos2 = np.matrix([[tr.x],[tr.y],[tr.z]])
+        self.platTrans2 = HV
 
     def callback(self, data):
         # Process Vicon data and send commands
@@ -725,6 +741,19 @@ class ORI:
         '''
 
         '''
+        # Back and forth hop on platform
+        steppts = np.array([
+            [0.0, 0.0, 0.05, -1.57,  3.5, 80, 1],
+            [0.0, 0.0, 0.05, -1.57,  3.5, 80, 2],
+            [0.0, 0.0, 0.05, -1.57,  3.5, 80, 2],
+            [0.0, 0.0, 0.05, -1.57,  3.5, 80, 2],
+            [0.0, 0.0, 0.05, -1.57,  3.5, 80, 4],
+            [0.0, 0.0, 0.05, -1.57,  3.5, 80, 4],
+            [0.0, 0.0, 0.05, -1.57,  3.7, 80, 4],
+            ])
+        '''
+
+        '''
         # Hop on platform
         steppts = np.array([
             [0.0, 0.0, 0.05, 0.0,   3.9, 80, 0],
@@ -838,6 +867,44 @@ class ORI:
             [1.2, 0.5, 0.0, 0.05,     3.8, 80, 0],
             [1.5, 0.5, 0.0, 0.05,     3.8, 80, 0],
             [1.8, 0.5, 0.0, 0.05,     3.2, 80, 0]
+            ])
+        '''
+
+        #'''
+        # Good!2
+        steppts = np.array([
+            [0.0, 0.0, 0.05, 0.0,    3.5, 80, 1],
+            [0.0, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,    2.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,    2.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,    2.5, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,    3.0, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,    3.0, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,    3.0, 80, 0],
+            ])
+        #'''
+
+        '''
+        # Good!2
+        steppts = np.array([
+            [-1.0, 0.0, 0.05, 0.0,    3.27, 80, 1],
+            [-1.0, 0.0, 0.05, 0.0,    3.27, 80, 0],
+            [-1.0, 0.0, 0.05, 0.0,    3.27, 80, 0],
+            [-1.0, 0.0, 0.05, 0.0,    3.68, 80, 0],
+            [-1.0, 0.0, 0.05, 0.0,    3.68, 80, 0],
+            [-0.5, 0.0, 0.05, 0.0,    3.68, 80, 0],
+            [0.5, 0.0, 0.05, 0.0,     3.68, 80, 0],
+            [1.5, 0.0, 0.05, 0.0,     3.68, 80, 0],
+            [2.0, 0.0, 0.05, 0.0,     3.27, 80, 0],
+            [2.0, 0.0, 0.05, 0.0,     3.27, 80, 0],
+            [2.0, 0.0, 0.05, 0.0,     3.68, 80, 0],
+            [2.0, 0.0, 0.05, 0.0,     3.68, 80, 0],
+            [1.5, 0.0, 0.05, 0.0,     3.68, 80, 0],
+            [0.5, 0.0, 0.05, 0.0,     3.68, 80, 0],
+            [-0.5, 0.0, 0.05, 0.0,    3.68, 80, 0],
             ])
         '''
 
@@ -1039,8 +1106,10 @@ class ORI:
         #self.Trajectory('Rectangle')
         if self.ctrl_mode == 0:
             ctrl = self.Raibert()
-        else:
+        elif self.ctrl_mode == 1:
             ctrl = self.DeadbeatCurveFit1()
+        else:
+            ctrl = self.RaibertVelocity()
         # self.RaibertInspired()
 
         # ROBOT COMMANDS --------------------------------------------
@@ -1138,15 +1207,16 @@ class ORI:
         n_pts = pts.shape[0] # number of steps in our list
 
         # Loop or hold position when we reach the end of the step list
+        prev_step = self.step_ind - 1
         if (self.step_ind == n_pts):
             if (pts[0,6] == 1): # loop and go back to the beginning
                 self.step_ind = 1
+                prev_step = n_pts - 1
             else: # no loop
                 self.step_ind = n_pts-1
+                prev_step = self.step_ind -1
 
         # Where do we want to aim after we touch down?
-        ptPlat = np.matrix([[pts[self.step_ind,0]],[pts[self.step_ind,1]],[pts[self.step_ind,2]],[1]])
-        ptPlatGlobal = self.platTrans.dot(ptPlat)
 
         if (pts[self.step_ind, 6] == 0 or self.step_ind == 0): # normal jump point
             self.desx = pts[self.step_ind, 0]
@@ -1156,6 +1226,8 @@ class ORI:
             self.desvx = 0
             self.desvy = 0
         elif (pts[self.step_ind, 6] == 2): # jump to the platform
+            ptPlat = np.matrix([[pts[self.step_ind,0]],[pts[self.step_ind,1]],[pts[self.step_ind,2]],[1]])
+            ptPlatGlobal = self.platTrans.dot(ptPlat)
             self.desx = ptPlatGlobal[0,0]
             self.desy = ptPlatGlobal[1,0]
             self.nextz = ptPlatGlobal[2,0]
@@ -1167,7 +1239,15 @@ class ORI:
             self.desvy = pts[self.step_ind, 1]
             self.nextz = pts[self.step_ind, 2]
             self.stepOpt = 3
-
+        elif (pts[self.step_ind, 6] == 4): # jump to the second platform
+            ptPlat2 = np.matrix([[pts[self.step_ind,0]],[pts[self.step_ind,1]],[pts[self.step_ind,2]],[1]])
+            ptPlatGlobal2 = self.platTrans2.dot(ptPlat2)
+            self.desx = ptPlatGlobal2[0,0]
+            self.desy = ptPlatGlobal2[1,0]
+            self.nextz = ptPlatGlobal2[2,0]
+            self.stepOpt = 0
+            self.desvx = 0
+            self.desvy = 0
 
         # Yaw and desired takeoff velocity
         self.desyaw = self.desyaw + min(max(pts[self.step_ind, 3]-self.desyaw,-yaw_rate*dt),yaw_rate*dt)
@@ -1182,10 +1262,16 @@ class ORI:
         if (self.step_ind == 0): # we are at the first point
             self.landz = pts[0, 2]
         else:
-            if pts[self.step_ind - 1, 6] == 2: # platform step
+            if pts[prev_step, 6] == 2: # platform step
+                ptPlat = np.matrix([[pts[self.step_ind-1,0]],[pts[self.step_ind-1,1]],[pts[self.step_ind-1,2]],[1]])
+                ptPlatGlobal = self.platTrans.dot(ptPlat)
                 self.landz = ptPlatGlobal[2,0]
+            elif pts[prev_step, 6] == 4: # platform 2 step
+                ptPlat2 = np.matrix([[pts[self.step_ind-1,0]],[pts[self.step_ind-1,1]],[pts[self.step_ind-1,2]],[1]])
+                ptPlatGlobal2 = self.platTrans2.dot(ptPlat2)
+                self.landz = ptPlatGlobal2[2,0]
             else: # normal step
-                self.landz = pts[self.step_ind - 1, 2]
+                self.landz = pts[prev_step, 2]
 
         # Velocities for Raibert control
         if (self.ctrl_mode == 0): # Raibert control
@@ -1331,8 +1417,8 @@ class ORI:
 
         # Desired velocities
         RB = np.matrix([[np.cos(self.euler[0]),np.sin(self.euler[0])],[-np.sin(self.euler[0]),np.cos(self.euler[0])]])
-        Berr = np.dot(RB,[[self.pos[0,0]-self.desx],[self.pos[1]-self.desy]])
-        Bv = np.dot(RB,[[self.vel[0,0]],[self.vel[1]]])
+        Berr = np.dot(RB,[[self.pos[0,0]-self.desx],[self.pos[1,0]-self.desy]])
+        Bv = np.dot(RB,[[self.vel[0,0]],[self.vel[1,0]]])
         Bvdes = np.dot(RB,[[self.desvx],[self.desvy]])
         Bades = np.dot(RB,[[self.desax],[self.desay]])
         vxdes = -KPx*Berr[0] + KV*Bvdes[0]
@@ -1449,6 +1535,60 @@ class ORI:
         roll = math.sin(yd/(l*math.cos(pitch)))
         l = l - 0.1 # shift for crank function
         '''
+
+        # calculate crank angle from foot extension
+        crank = 2.034*10**5*l**5 - 6.661*10**4*l**4 + 7215*l**3 - 141.8*l**2 + 1.632*l + 0.03071 
+        motor = 25*crank # motor angle from crank angle and gear ratio
+
+        motor = min(max(motor, 52),80)
+        roll = min(max(roll, -math.pi/6), math.pi/6)
+        pitch = min(max(pitch, -math.pi/6), math.pi/6)
+
+        ctrl = [roll,pitch,motor,ext]
+
+        return ctrl
+
+    def RaibertVelocity(self):
+        # 3D deadbeat controller
+        desvz = self.params.phase[0] #3.67#3.27#3.5
+        ext = self.params.phase[1]
+
+        # Ballistic flight phase
+        # (Currently assuming the ground height changes stepwise without slope)
+        # time remain in current flight phase
+        t_pred = self.vel[2,0]/9.81 + (self.vel[2,0]**2 + 2*9.81*max(self.pos[2,0] -0.25 -self.landz ,0))**0.5/9.81
+        # predicted touchdown vertical velocity
+        vv_pred = -(2*(0.5*self.vel[2,0]**2 + max(9.81*(self.pos[2,0] -0.25 -self.landz) ,0)))**0.5
+        x_pred = self.pos[0,0] + t_pred*self.vel[0,0] # predicted x touchdown
+        y_pred = self.pos[1,0] + t_pred*self.vel[1,0] # predicted y touchdown
+
+        # Desired velocities on takeoff
+        if (self.stepOpt == 0):
+            errx = x_pred-self.desx
+            erry = y_pred-self.desy
+            des_t = desvz/9.81 + (2*(self.landz + 0.5*desvz**2/9.81 - self.nextz)/9.81)**0.5
+            desvx = self.desvx - errx/des_t
+            desvy = self.desvy - erry/des_t
+        elif (self.stepOpt == 3):
+            desvx = self.desvx
+            desvy = self.desvy
+
+        # Desired velocities
+        RB = np.matrix([[np.cos(self.euler[0]),np.sin(self.euler[0])],[-np.sin(self.euler[0]),np.cos(self.euler[0])]])
+        Bv = np.dot(RB,[[self.vel[0,0]],[self.vel[1,0]]])
+        Bvdes = np.dot(RB,[[desvx],[desvy]])
+
+        KRaibert = 0.010
+        #l = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0],[70.0, 70.0, 65.0, 60.0, 55.0, 55.0])
+        #l = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0], [0.2436, 0.2436, 0.2394, 0.2347, 0.2293, 0.2293])
+        #dur = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0],[0.06, 0.06, 0.08, 0.09, 0.10, 0.10])
+        l = 0.2394
+        xd = max(min(-dur*Bv[0]/2 + KRaibert*(Bvdes[0] - Bv[0]),l/2),-l/2)
+        pitch = math.sin(xd/l)
+        yd = max(min(dur*Bv[1]/2 - KRaibert*(Bvdes[1] - Bv[1]),l*math.cos(pitch)/2),-l*math.cos(pitch)/2)
+        roll = math.sin(yd/(l*math.cos(pitch)))
+        l = l - 0.1 # shift for crank function
+
 
         # calculate crank angle from foot extension
         crank = 2.034*10**5*l**5 - 6.661*10**4*l**4 + 7215*l**3 - 141.8*l**2 + 1.632*l + 0.03071 
