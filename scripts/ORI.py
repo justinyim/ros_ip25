@@ -871,21 +871,35 @@ class ORI:
         '''
 
         #'''
-        # Good!2
+        # New Raibert velocity
         steppts = np.array([
-            [0.0, 0.0, 0.05, 0.0,    3.5, 80, 1],
-            [0.0, 0.0, 0.05, 0.0,    3.5, 80, 0],
-            [0.0, 0.0, 0.05, 0.0,    3.5, 80, 0],
-            [0.0, 0.0, 0.05, 0.0,    3.5, 80, 0],
-            [0.0, 0.0, 0.05, 0.0,    3.5, 80, 0],
-            [0.0, 0.0, 0.05, 0.0,    2.5, 80, 0],
-            [0.0, 0.0, 0.05, 0.0,    2.5, 80, 0],
-            [0.0, 0.0, 0.05, 0.0,    2.5, 80, 0],
-            [0.0, 0.0, 0.05, 0.0,    3.0, 80, 0],
-            [0.0, 0.0, 0.05, 0.0,    3.0, 80, 0],
-            [0.0, 0.0, 0.05, 0.0,    3.0, 80, 0],
+            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0]
             ])
-        #'''
+            
+        '''
+            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 1],
+            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [0.6, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [0.9, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [0.9, 0.0, 0.05, 1.6,    3.5, 80, 0],
+            [0.9, 0.0, 0.05, 1.6,    3.5, 80, 0],
+            [0.9, 0.0, 0.05, 1.6,    3.5, 80, 0],
+            [0.9, 0.3, 0.05, 1.6,    3.5, 80, 0],
+            [0.9, 0.6, 0.05, 1.6,    3.5, 80, 0],
+            [0.7, 0.6, 0.05, 1.6,    3.5, 80, 0],
+            [0.5, 0.6, 0.05, 1.6,    3.5, 80, 0],
+            [0.3, 0.6, 0.05, 1.6,    3.5, 80, 0],
+            [0.1, 0.6, 0.05, 1.6,    3.5, 80, 0],
+            [-0.1, 0.6, 0.05, 1.6,    3.5, 80, 0],
+            [-0.3, 0.6, 0.05, 1.6,    3.5, 80, 0],
+            [-0.3, 0.3, 0.05, 1.6,    3.5, 80, 0],
+            [-0.3, 0.0, 0.05, 1.6,    3.5, 80, 0],
+            ])
+        '''
 
         '''
         # Good!2
@@ -1251,10 +1265,10 @@ class ORI:
 
         # Yaw and desired takeoff velocity
         self.desyaw = self.desyaw + min(max(pts[self.step_ind, 3]-self.desyaw,-yaw_rate*dt),yaw_rate*dt)
-        if (self.ctrl_mode == 1): # Deadbeat
+        if (self.ctrl_mode == 1 or self.ctrl_mode == 2): # Deadbeat
             self.params.phase[0] = pts[self.step_ind, 4]
             self.params.phase[1] = pts[self.step_ind, 5]
-        elif (self.ctrl_mode == 1): # Raibert
+        elif (self.ctrl_mode == 0): # Raibert
             self.params.phase[0] = 60
             self.params.phase[1] = 80
 
@@ -1563,30 +1577,32 @@ class ORI:
         y_pred = self.pos[1,0] + t_pred*self.vel[1,0] # predicted y touchdown
 
         # Desired velocities on takeoff
-        if (self.stepOpt == 0):
+        if (self.stepOpt == 3):
+            desvx = self.desvx
+            desvy = self.desvy
+        else:
             errx = x_pred-self.desx
             erry = y_pred-self.desy
             des_t = desvz/9.81 + (2*(self.landz + 0.5*desvz**2/9.81 - self.nextz)/9.81)**0.5
             desvx = self.desvx - errx/des_t
             desvy = self.desvy - erry/des_t
-        elif (self.stepOpt == 3):
-            desvx = self.desvx
-            desvy = self.desvy
+            
 
         # Desired velocities
         RB = np.matrix([[np.cos(self.euler[0]),np.sin(self.euler[0])],[-np.sin(self.euler[0]),np.cos(self.euler[0])]])
         Bv = np.dot(RB,[[self.vel[0,0]],[self.vel[1,0]]])
         Bvdes = np.dot(RB,[[desvx],[desvy]])
 
-        KRaibert = 0.010
+        KRaibert = 0.008
         #l = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0],[70.0, 70.0, 65.0, 60.0, 55.0, 55.0])
         #l = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0], [0.2436, 0.2436, 0.2394, 0.2347, 0.2293, 0.2293])
         #dur = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0],[0.06, 0.06, 0.08, 0.09, 0.10, 0.10])
-        l = 0.2394
+        l = 0.2347
+        dur = 0.11#dur = 0.08
         xd = max(min(-dur*Bv[0]/2 + KRaibert*(Bvdes[0] - Bv[0]),l/2),-l/2)
-        pitch = math.sin(xd/l)
+        pitch = math.asin(xd/l)
         yd = max(min(dur*Bv[1]/2 - KRaibert*(Bvdes[1] - Bv[1]),l*math.cos(pitch)/2),-l*math.cos(pitch)/2)
-        roll = math.sin(yd/(l*math.cos(pitch)))
+        roll = math.asin(yd/(l*math.cos(pitch)))
         l = l - 0.1 # shift for crank function
 
 
