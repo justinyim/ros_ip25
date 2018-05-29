@@ -278,9 +278,16 @@ class ORI:
 
         self.numSamples = int(ceil(1000 * (self.params.duration + shared.leadinTime + shared.leadoutTime) / 1000.0))
         eraseFlashMem(self.numSamples)
-        
+
         # START EXPERIMENT
         raw_input("Press enter to start run ...")
+
+        # get gyro bias
+        unusedBiasSignal = [0]
+        xb_send(0, command.GYRO_BIAS, pack('h', *unusedBiasSignal))
+        time.sleep(1)
+
+        # start
         startTelemetrySave(self.numSamples)
         exp = [2]
         stopSignal = [0]
@@ -327,6 +334,12 @@ class ORI:
                 flashReadback(self.numSamples, self.params, self.manParams)
                 self.telemetry_read = 1
             self.MJ_state = 3
+        elif data.a == 6: # use normal vicon attitude updates
+            newMode = [0]
+            xb_send(0, command.ONBOARD_MODE, pack('h', *newMode))
+        elif data.a == 7: # use ONLY onboard gyro integration
+            newMode = [1]
+            xb_send(0, command.ONBOARD_MODE, pack('h', *newMode))
 
         if data.a == 10:
             self.ctrl_mode = 0
@@ -870,34 +883,31 @@ class ORI:
             ])
         '''
 
-        #'''
-        # New Raibert velocity
-        steppts = np.array([
-            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0]
-            ])
-            
         '''
+        # New Raibert velocity (first FPV path)
+        steppts = np.array([
             [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 1],
             [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
             [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
             [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
             [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
-            [0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
-            [0.6, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [0.1, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [0.5, 0.0, 0.05, 0.0,    3.5, 80, 0],
             [0.9, 0.0, 0.05, 0.0,    3.5, 80, 0],
             [0.9, 0.0, 0.05, 1.6,    3.5, 80, 0],
             [0.9, 0.0, 0.05, 1.6,    3.5, 80, 0],
             [0.9, 0.0, 0.05, 1.6,    3.5, 80, 0],
             [0.9, 0.3, 0.05, 1.6,    3.5, 80, 0],
             [0.9, 0.6, 0.05, 1.6,    3.5, 80, 0],
-            [0.7, 0.6, 0.05, 1.6,    3.5, 80, 0],
-            [0.5, 0.6, 0.05, 1.6,    3.5, 80, 0],
-            [0.3, 0.6, 0.05, 1.6,    3.5, 80, 0],
-            [0.1, 0.6, 0.05, 1.6,    3.5, 80, 0],
-            [-0.1, 0.6, 0.05, 1.6,    3.5, 80, 0],
-            [-0.3, 0.6, 0.05, 1.6,    3.5, 80, 0],
-            [-0.3, 0.3, 0.05, 1.6,    3.5, 80, 0],
-            [-0.3, 0.0, 0.05, 1.6,    3.5, 80, 0],
+            [0.9, 0.6, 0.05, 0.0,    3.5, 80, 0],
+            [0.9, 0.6, 0.05, 0.0,    3.5, 80, 0],
+            [0.9, 0.6, 0.05, 0.0,    3.5, 80, 0],
+            [0.5, 0.6, 0.05, 0.0,    3.5, 80, 0],
+            [0.1, 0.6, 0.05, 0.0,    3.5, 80, 0],
+            [-0.3, 0.6, 0.05, 0.0,    3.5, 80, 0],
+            [-0.3, 0.4, 0.05, 0.0,    3.5, 80, 0],
+            [-0.3, 0.2, 0.05, 0.0,    3.5, 80, 0],
+            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
             ])
         '''
 
@@ -1598,7 +1608,7 @@ class ORI:
         #l = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0], [0.2436, 0.2436, 0.2394, 0.2347, 0.2293, 0.2293])
         #dur = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0],[0.06, 0.06, 0.08, 0.09, 0.10, 0.10])
         l = 0.2347
-        dur = 0.11#dur = 0.08
+        dur = 0.08
         xd = max(min(-dur*Bv[0]/2 + KRaibert*(Bvdes[0] - Bv[0]),l/2),-l/2)
         pitch = math.asin(xd/l)
         yd = max(min(dur*Bv[1]/2 - KRaibert*(Bvdes[1] - Bv[1]),l*math.cos(pitch)/2),-l*math.cos(pitch)/2)
