@@ -56,6 +56,46 @@ off_mat[0:3,3] = pos_off
 #k_file = sio.loadmat('/home/justin/Berkeley/FearingLab/Jumper/robotdata/physicalDeadbeatCurveFit1.mat')
 #k = k_file['a_nl'].T
 
+'''
+k = [[   -0.2110,         0,         0], # New Dasher gains from runridMotor15.
+[         0,         0,   -0.0087],
+[    0.0708,         0,         0],
+[         0,   -0.0687,         0],
+[         0,         0,    0.0077],
+[         0,         0,    0.0001],
+[         0,         0,   -0.0018],
+[         0,         0,   -0.0053],
+[         0,         0,   -0.0118],
+[         0,         0,    0.0254],
+[   -0.0396,         0,         0],
+[    0.0164,         0,         0],
+[         0,   -0.0189,         0],
+[   -0.0124,         0,         0],
+[   -0.0521,         0,         0],
+[         0,    0.0541,         0],
+[    0.0036,         0,         0],
+[         0,         0,    0.0005],
+[   -0.0060,         0,         0],
+[         0,    0.0068,         0],
+[         0,         0,    0.0098],
+[   -0.0024,   -0.0000,    0.0000],
+[   -0.0069,    0.0000,   -0.0000],
+[   -0.0000,   -0.0029,    0.0000],
+[   -0.0000,    0.0047,   -0.0000],
+[   -0.0000,    0.0000,   -0.0002],
+[   -0.0000,    0.0000,   -0.0021],
+[    0.0000,   -0.0000,   -0.0055],
+[   -0.0000,    0.0000,   -0.0035],
+[    0.0000,    0.0000,   -0.0026],
+[    0.0000,   -0.0000,   -0.0118]]
+k = np.matrix(k).T
+
+x_op = np.array([0, -3.3, 0, 0, 3.3]) # Operating (equilibrium) point state
+u_op = np.array([0, 0, 0.24]) # Operating point equilibrium control input
+
+usePlatform = 1
+'''
+
 #'''
 k = [[   -0.2080,         0,         0], # Gains now modified from runGridMotor10.mat
 [         0,         0,    -0.0143],
@@ -188,7 +228,8 @@ class ORI:
         self.unheard_flag = 0
         self.xbee_sending = 1
         self.MJ_state = 0 # 0: run, 1: stand, 2: stop
-        self.ctrl_mode = 2 # 0: Raibert, 1: deadbeat curve fit, 2: Raibert velocity
+        self.ctrl_mode = 2 # 0: Old Raibert, 1: deadbeat curve fit, 2: New Raibert velocity
+        self.onboard_control = False # use onboard calculated control and feed velocity commands
 
         # ROS
         self.tf_pub = tf.TransformBroadcaster()
@@ -213,6 +254,9 @@ class ORI:
         self.startTime = time.time()
         self.stepOpt = 0
 
+        self.desvx2 = 0.0
+        self.desvy2 = 0.0
+
         self.landz = 0.0
         self.nextz = 0.0
 
@@ -226,11 +270,11 @@ class ORI:
                 # Motor gains format:
         #  [ Kp , Ki , Kd , Kaw , Kff     ,  Kp , Ki , Kd , Kaw , Kff ]
         #    ----------LEFT----------        ---------_RIGHT----------
-        motorgains = [140,0,20,0,0, 0,0,0,0,0]
-        thrustgains = [210,0,160,160,0,140]
+        motorgains = [140,0,25,0,0, 0,0,0,0,0]
+        thrustgains = [200,0,180,150,0,160]
         # roll kp, ki, kd; yaw kp, ki, kd
 
-        duration = 5000
+        duration = 8000
         rightFreq = thrustgains # thruster gains
         if salto_name == 1:
             leftFreq = [0.16, 0.2, 0.5, .16, 0.12, 0.25] # Raibert-like gains
@@ -315,9 +359,11 @@ class ORI:
         print "RECEIVED " + str(data.a)
 
         if data.a == 1:
+            self.onboard_control = False
             if self.MJ_state == 0:
                 self.MJ_state = 1
         if data.a == 2:
+            self.onboard_control = False
             while self.xbee_sending == 1:
                 rospy.sleep(0.001)
             stopSignal = [0]
@@ -336,10 +382,16 @@ class ORI:
             self.MJ_state = 3
         elif data.a == 6: # use normal vicon attitude updates
             newMode = [0]
+            self.onboard_control = False
             xb_send(0, command.ONBOARD_MODE, pack('h', *newMode))
         elif data.a == 7: # use ONLY onboard gyro integration
             newMode = [1]
             xb_send(0, command.ONBOARD_MODE, pack('h', *newMode))
+        elif data.a == 8: # use onboard Raibert controller
+            newMode = [8]
+            self.onboard_control = True
+            xb_send(0, command.ONBOARD_MODE, pack('h', *newMode))
+
 
         if data.a == 10:
             self.ctrl_mode = 0
@@ -450,7 +502,21 @@ class ORI:
 
         # DEADBEAT --------------------------------------------------
         #waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 3.27, 80, 3.0, 2]]) # in place deadbeat
-        steppts = np.array([[0.0, 0.0, 0.05, 0.0,     3.4, 80, 0]]) # deadbeat step planner in place
+        steppts = np.array([[0.0, 0.0, 0.05, 0.0,     3.0, 80, 0]]) # deadbeat step planner in place
+
+        '''
+        # Hopping to different heights
+        steppts = np.array([[0.0, 0.0, 0.05, 0.0,     3.4, 80, 1],
+            [0.0, 0.0, 0.05, 0.0,     3.4, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,     3.4, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,     2.6, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,     2.6, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,     3.0, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,     3.0, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,     3.8, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,     3.8, 80, 0]]) # deadbeat step planner in place
+        '''
+
 
         '''
         # Turn in place
@@ -608,7 +674,44 @@ class ORI:
             [-1.6002,-1.1916,0.05,0,3.6505,80,0],
             [-0.5761,-1.0943,0.05,0,3.5915,80,0],
             ])
-        #'''
+        '''
+
+        '''
+        # Random position commands
+        steppts = np.array([
+            [0,0,0.05,0,3.4,80,0],
+            [0,0,0.05,0,3.4,80,0],
+            [0,0,0.05,0,3.4,80,0],
+            [0,0,0.05,0,3.4,80,0],
+            [0,0,0.05,0,3.6,80,0],
+            [0.6789,0.2263,0.05,0,3.7,80,0],
+            [0.49976,0.075119,0.05,0,3.3097,80,0],
+            [0.13346,-0.0098404,0.05,0,3.5231,80,0],
+            [0.63651,-0.089558,0.05,0,3.7588,80,0],
+            [1.9414,-0.2772,0.05,0,3.8181,80,0],
+            [1.903,0.0015268,0.05,0,3.5586,80,0],
+            [1.3948,-0.096677,0.05,0,3.587,80,0],
+            [0.46556,-0.35597,0.05,0,3.4256,80,0],
+            [1.4839,-0.24635,0.05,0,3.403,80,0],
+            [1.7646,-0.35539,0.05,0,3.3382,80,0],
+            [0.73514,-0.22398,0.05,0,3.6598,80,0],
+            [0.0074349,0.037022,0.05,0,3.8348,80,0],
+            [-1.2101,0.034415,0.05,0,3.7116,80,0],
+            [-0.8531,-0.11154,0.05,0,3.7809,80,0],
+            [-0.036723,-0.47239,0.05,0,3.853,80,0],
+            [0.2762,-0.2681,0.05,0,3.4184,80,0],
+            [0.94713,-0.38545,0.05,0,3.2825,80,0],
+            [0.88426,-0.42921,0.05,0,2.8877,80,0],
+            [1.238,-0.56011,0.05,0,2.903,80,0],
+            [0.9234,-0.47594,0.05,0,2.6159,80,0],
+            [1.2128,-0.44894,0.05,0,2.5336,80,0],
+            [0.9723,-0.39974,0.05,0,2.4941,80,0],
+            [0.7567,-0.35658,0.05,0,2.8786,80,0],
+            [1.2118,-0.24798,0.05,0,2.7336,80,0],
+            [1.3711,-0.15685,0.05,0,2.8151,80,0],
+            [1.6339,-0.021904,0.05,0,3.212,80,0],
+            [1.853,0.20396,0.05,0,3.604,80,0]])
+        '''
 
         '''
         # Random position commands
@@ -890,7 +993,6 @@ class ORI:
             [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
             [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
             [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
-            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
             [0.1, 0.0, 0.05, 0.0,    3.5, 80, 0],
             [0.5, 0.0, 0.05, 0.0,    3.5, 80, 0],
             [0.9, 0.0, 0.05, 0.0,    3.5, 80, 0],
@@ -1167,14 +1269,33 @@ class ORI:
             mat_pit = quaternion_matrix()
             '''
 
-            toSend = [ES[0], ES[1], ES[2], Cyaw, Croll, CS[0], CS[1], CS[2]]
-            for i in range(8):
-                if toSend[i] > 32767:
-                    toSend[i] = 32767
-                elif toSend[i] < -32767:
-                    toSend[i] = -32767
-            xb_send(0, command.INTEGRATED_VICON, pack('8h',*toSend))
-            self.xbee_sending = 0
+            if self.onboard_control == False:
+                toSend = [ES[0], ES[1], ES[2], Cyaw, Croll, CS[0], CS[1], CS[2]]
+                for i in range(8):
+                    if toSend[i] > 32767:
+                        toSend[i] = 32767
+                    elif toSend[i] < -32767:
+                        toSend[i] = -32767
+                xb_send(0, command.INTEGRATED_VICON, pack('8h',*toSend))
+                self.xbee_sending = 0
+            else:
+                r1 = int(65*LengthScaling)
+                e1 = int(80*CurrentScaling)
+                vx1 = int(0)#int(2000*self.desvx2)
+                vy1 = int(0)#int(2000*self.desvy2)
+                vz1 = int(2000*self.params.phase[0])
+
+                Croll = vy1
+                CS[0] = vx1
+
+                toSend = [vx1,vy1,vz1, Cyaw, 0, 0, r1,e1]
+                for i in range(8):
+                    if toSend[i] > 32767:
+                        toSend[i] = 32767
+                    elif toSend[i] < -32767:
+                        toSend[i] = -32767
+                xb_send(0, command.INTEGRATED_VICON, pack('8h',*toSend))
+                self.xbee_sending = 0
 
             # Printing
             #print(self.step_ind,ctrl[1],ctrl[2],ctrl[3]) # Deadbeat
@@ -1501,50 +1622,50 @@ class ORI:
             errx = x_pred-self.desx
             erry = y_pred-self.desy
             des_t = desvz/9.81 + (2*(self.landz + 0.5*desvz**2/9.81 - self.nextz)/9.81)**0.5
-            desvx = self.desvx - errx/des_t
-            desvy = self.desvy - erry/des_t
+            self.desvx2 = self.desvx - errx/des_t
+            self.desvy2 = self.desvy - erry/des_t
         elif (self.stepOpt == 3):
-            desvx = self.desvx
-            desvy = self.desvy
+            self.desvx2 = self.desvx
+            self.desvy2 = self.desvy
 
 
-        if time.time() - self.last_step > 0.05: # Flight phase (normal operation)
+        #if time.time() - self.last_step > 0.05: # Flight phase (normal operation)
 
-            vh = (self.vel[0,0,]**2 + self.vel[1,0]**2)**0.5 # incoming horizontal velocity
-            vv = vv_pred # incoming vertical velocity
-            heading = math.atan2(self.vel[1,0], self.vel[0,0]) # incoming horizontal velocity heading
-            vxo = math.cos(heading)*desvx + math.sin(heading)*desvy # desired incoming-velocity-frame outgoing longitudinal velocity
-            vyo = -math.sin(heading)*desvx + math.cos(heading)*desvy # desired outgoing lateral velocity in the incoming frame
-            vzo = desvz # TODO: make this into a parameters
+        vh = (self.vel[0,0]**2 + self.vel[1,0]**2)**0.5 # incoming horizontal velocity
+        vv = vv_pred # incoming vertical velocity
+        heading = math.atan2(self.vel[1,0], self.vel[0,0]) # incoming horizontal velocity heading
+        vxo = math.cos(heading)*self.desvx2 + math.sin(heading)*self.desvy2 # desired incoming-velocity-frame outgoing longitudinal velocity
+        vyo = -math.sin(heading)*self.desvx2 + math.cos(heading)*self.desvy2 # desired outgoing lateral velocity in the incoming frame
+        vzo = desvz # TODO: make this into a parameters
 
-            vxo = max(min(vxo,2.5),-2.5)
-            vyo = max(min(vyo,1.0),-1.0)
+        vxo = max(min(vxo,2.5),-2.5)
+        vyo = max(min(vyo,1.0),-1.0)
 
-            x = np.array([vh,vv,vxo,vyo,vzo]) - x_op;
+        x = np.array([vh,vv,vxo,vyo,vzo]) - x_op;
 
-            x2 = np.hstack((x,
-                x**2,
-                x[0]*x[1], x[2]*x[1], x[3]*x[1],
-                x[0]*x[4], x[2]*x[4], x[3]*x[4],
-                x**3,
-                x[0]*x[3]**2, x[2]*x[3]**2, x[0]**2*x[3], x[2]**2*x[3],
-                x[0]**2*x[1], x[2]**2*x[1], x[3]**2*x[1],
-                x[0]**2*x[4], x[2]**2*x[4], x[3]**2*x[4]))
-            prl = k.dot(x2) # curve-fit controller
-            prl = prl.T
+        x2 = np.hstack((x,
+            x**2,
+            x[0]*x[1], x[2]*x[1], x[3]*x[1],
+            x[0]*x[4], x[2]*x[4], x[3]*x[4],
+            x**3,
+            x[0]*x[3]**2, x[2]*x[3]**2, x[0]**2*x[3], x[2]**2*x[3],
+            x[0]**2*x[1], x[2]**2*x[1], x[3]**2*x[1],
+            x[0]**2*x[4], x[2]**2*x[4], x[3]**2*x[4]))
+        prl = k.dot(x2) # curve-fit controller
+        prl = prl.T
 
-            # Converting from incoming velocity frame to world frame for touchdown angles
-            R1 = euler_matrix(heading - self.euler[0], prl[0], prl[1], 'rzyx')
-            euler1 = euler_from_matrix(R1, 'ryxz')
+        # Converting from incoming velocity frame to world frame for touchdown angles
+        R1 = euler_matrix(heading - self.euler[0], prl[0], prl[1], 'rzyx')
+        euler1 = euler_from_matrix(R1, 'ryxz')
 
-            roll = euler1[1] + u_op[0] # roll angle (with added operating point input)
-            pitch = euler1[0] + u_op[1] # pitch angle (with added operating point input)
-            l = prl[2] - 0.1 + u_op[2] # leg length (subtracting offset and adding operating point input)
+        roll = euler1[1] + u_op[0] # roll angle (with added operating point input)
+        pitch = euler1[0] + u_op[1] # pitch angle (with added operating point input)
+        l = prl[2] - 0.1 + u_op[2] # leg length (subtracting offset and adding operating point input)
 
-        else: # Stance phase
-            pitch = math.atan2(desvx, desvz)
-            roll = math.atan2(-desvy, desvz)
-            l = 80
+        #else: # Stance phase
+        #    pitch = math.atan2(self.desvx2, self.desvz)
+        #    roll = math.atan2(-self.desvy2, self.desvz)
+        #    l = 80
 
 
         # Raibert comparison
@@ -1553,9 +1674,9 @@ class ORI:
         #l = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0],[70.0, 70.0, 65.0, 60.0, 55.0, 55.0])
         l = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0], [0.2436, 0.2436, 0.2394, 0.2347, 0.2293, 0.2293])
         dur = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0],[0.06, 0.06, 0.08, 0.09, 0.10, 0.10])
-        xd = max(min(-dur*self.vel[0,0]/2 + KRaibert*(desvx - self.vel[0,0]),l/2),-l/2)
+        xd = max(min(-dur*self.vel[0,0]/2 + KRaibert*(self.desvx2 - self.vel[0,0]),l/2),-l/2)
         pitch = math.sin(xd/l)
-        yd = max(min(dur*self.vel[1,0]/2 - KRaibert*(desvy - self.vel[1,0]),l*math.cos(pitch)/2),-l*math.cos(pitch)/2)
+        yd = max(min(dur*self.vel[1,0]/2 - KRaibert*(self.desvy2 - self.vel[1,0]),l*math.cos(pitch)/2),-l*math.cos(pitch)/2)
         roll = math.sin(yd/(l*math.cos(pitch)))
         l = l - 0.1 # shift for crank function
         '''
@@ -1588,26 +1709,26 @@ class ORI:
 
         # Desired velocities on takeoff
         if (self.stepOpt == 3):
-            desvx = self.desvx
-            desvy = self.desvy
+            self.desvx2 = self.desvx
+            self.desvy2 = self.desvy
         else:
             errx = x_pred-self.desx
             erry = y_pred-self.desy
             des_t = desvz/9.81 + (2*(self.landz + 0.5*desvz**2/9.81 - self.nextz)/9.81)**0.5
-            desvx = self.desvx - errx/des_t
-            desvy = self.desvy - erry/des_t
+            self.desvx2 = self.desvx - errx/des_t
+            self.desvy2 = self.desvy - erry/des_t
             
 
         # Desired velocities
         RB = np.matrix([[np.cos(self.euler[0]),np.sin(self.euler[0])],[-np.sin(self.euler[0]),np.cos(self.euler[0])]])
         Bv = np.dot(RB,[[self.vel[0,0]],[self.vel[1,0]]])
-        Bvdes = np.dot(RB,[[desvx],[desvy]])
+        Bvdes = np.dot(RB,[[self.desvx2],[self.desvy2]])
 
         KRaibert = 0.008
         #l = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0],[70.0, 70.0, 65.0, 60.0, 55.0, 55.0])
         #l = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0], [0.2436, 0.2436, 0.2394, 0.2347, 0.2293, 0.2293])
         #dur = np.interp(desvz,[0.0, 2.0, 3.0, 3.6, 3.7, 5.0],[0.06, 0.06, 0.08, 0.09, 0.10, 0.10])
-        l = 0.2347
+        l = 0.24#0.2347
         dur = 0.08
         xd = max(min(-dur*Bv[0]/2 + KRaibert*(Bvdes[0] - Bv[0]),l/2),-l/2)
         pitch = math.asin(xd/l)
