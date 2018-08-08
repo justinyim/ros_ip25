@@ -13,6 +13,7 @@ from tf.transformations import *
 import scipy.io as sio
 import time,sys,os,traceback
 import serial
+import pygame
 
 sys.path.append('/home/justin/Documents/Studio1458/ImageProc/roach/python')
 sys.path.append('/home/justin/Documents/Studio1458/ImageProc/roach/python/lib')
@@ -230,6 +231,7 @@ class ORI:
         self.MJ_state = 0 # 0: run, 1: stand, 2: stop
         self.ctrl_mode = 2 # 0: Old Raibert, 1: deadbeat curve fit, 2: New Raibert velocity
         self.onboard_control = False # use onboard calculated control and feed velocity commands
+        self.use_joystick = False
 
         # ROS
         self.tf_pub = tf.TransformBroadcaster()
@@ -270,8 +272,10 @@ class ORI:
                 # Motor gains format:
         #  [ Kp , Ki , Kd , Kaw , Kff     ,  Kp , Ki , Kd , Kaw , Kff ]
         #    ----------LEFT----------        ---------_RIGHT----------
-        motorgains = [140,0,25,0,0, 0,0,0,0,0]
-        thrustgains = [200,0,180,150,0,160]
+        motorgains = [110,0,25,0,0, 0,0,0,0,0]
+        thrustgains = [160,0,190,100,0,150]
+        #motorgains = [0,0,0,0,0, 0,0,0,0,0]
+        #thrustgains = [0,0,0, 0,0,0]
         # roll kp, ki, kd; yaw kp, ki, kd
 
         duration = 8000
@@ -298,6 +302,15 @@ class ORI:
         self.params = hallParams(motorgains, duration, rightFreq, leftFreq, phase, telemetry, repeat)
         xb_send(0, command.SET_THRUST_OPEN_LOOP, pack('6h',*thrustgains))
         setMotorGains(motorgains)
+
+
+        # Joystick --------------------
+        pygame.init()
+        self.joy = pygame.joystick.Joystick(0)
+        self.joy.init()
+        self.joyaxes = self.joy.get_numaxes()
+        self.joyinputs = [0,0,0,0,0,0]
+        self.joyyaw = 0
 
 
         # BEGIN -----------------------
@@ -360,10 +373,12 @@ class ORI:
 
         if data.a == 1:
             self.onboard_control = False
+            self.use_joystick = False
             if self.MJ_state == 0:
                 self.MJ_state = 1
         if data.a == 2:
             self.onboard_control = False
+            self.use_joystick = False
             while self.xbee_sending == 1:
                 rospy.sleep(0.001)
             stopSignal = [0]
@@ -383,6 +398,7 @@ class ORI:
         elif data.a == 6: # use normal vicon attitude updates
             newMode = [0]
             self.onboard_control = False
+            self.use_joystick = False
             xb_send(0, command.ONBOARD_MODE, pack('h', *newMode))
         elif data.a == 7: # use ONLY onboard gyro integration
             newMode = [1]
@@ -391,11 +407,23 @@ class ORI:
             newMode = [8]
             self.onboard_control = True
             xb_send(0, command.ONBOARD_MODE, pack('h', *newMode))
+        elif data.a == 9: # use joystick
+            self.use_joystick = True
+            self.ctrl_mode = 0 # use original Raibert when we return
+            newMode = [8]
+            self.onboard_control = True
+            xb_send(0, command.ONBOARD_MODE, pack('h', *newMode))
+        elif data.a == 10: # use joystick only with mocap attitude control
+            self.use_joystick = True
+            self.ctrl_mode = 2 # use Raibert velocity
+            newMode = [0]
+            self.onboard_control = False
+            xb_send(0, command.ONBOARD_MODE, pack('h', *newMode))
 
 
-        if data.a == 10:
+        if data.a == 20:
             self.ctrl_mode = 0
-        elif data.a == 11:
+        elif data.a == 21:
             self.ctrl_mode = 1
 
         return 0
@@ -1227,9 +1255,33 @@ class ORI:
                 [-0.3, -0.3, 0.0,       0.0, 0.0, 63, 80, 4.0, 0],
                 [-0.3, -0.3, 0.0,       0.0, 0.0, 67, 80, 3.0, 0]]) # slow down
         #'''
+        
+        # Scaling constants
+        AngleScaling = 3667; # rad to 15b 2000deg/s integrated 1000Hz
+            # 180(deg)/pi(rad) * 2**15(ticks)/2000(deg/s) * 1000(Hz) = 938734
+            # 938734 / 2**8 = 3667
+        LengthScaling = 256; # radians to 23.8 fixed pt radians
+        CurrentScaling = 256; # radians to 23.8 fixed pt radians
+
+        # Read joystick
+        pygame.event.pump() # joystick
+
         #self.Waypoints(waypts)
         self.Steppoints(steppts)
         #self.Trajectory('Rectangle')
+
+        if self.use_joystick and not self.onboard_control: #joystick override velocity
+            # still using mocap attitude control
+            for i in range(self.joyaxes):
+                self.joyinputs[i] = self.joy.get_axis(i)
+            self.joyyaw = self.joyyaw -self.joyinputs[0]/100
+            self.stepOpt = 3
+            self.desvx = -2*self.joyinputs[4]
+            self.desvy = -self.joyinputs[3]
+            self.params.phase[0] = 3 - self.joyinputs[1] #3.67#3.27#3.5
+            self.params.phase[1] = 80
+            self.desyaw = self.joyyaw
+
         if self.ctrl_mode == 0:
             ctrl = self.Raibert()
         elif self.ctrl_mode == 1:
@@ -1239,11 +1291,6 @@ class ORI:
         # self.RaibertInspired()
 
         # ROBOT COMMANDS --------------------------------------------
-        AngleScaling = 3667; # rad to 15b 2000deg/s integrated 1000Hz
-            # 180(deg)/pi(rad) * 2**15(ticks)/2000(deg/s) * 1000(Hz) = 938734
-            # 938734 / 2**8 = 3667
-        LengthScaling = 256; # radians to 23.8 fixed pt radians
-        CurrentScaling = 256; # radians to 23.8 fixed pt radians
         ES = [int(euler[0]*AngleScaling),int(euler[1]*AngleScaling),int(euler[2]*AngleScaling)]
 
         if np.isnan(ctrl[0]): # NaN check
@@ -1279,23 +1326,33 @@ class ORI:
                 xb_send(0, command.INTEGRATED_VICON, pack('8h',*toSend))
                 self.xbee_sending = 0
             else:
-                r1 = int(65*LengthScaling)
-                e1 = int(80*CurrentScaling)
-                vx1 = int(0)#int(2000*self.desvx2)
-                vy1 = int(0)#int(2000*self.desvy2)
-                vz1 = int(2000*self.params.phase[0])
+                if self.use_joystick == False:
+                    vx1 = int(2000*(self.desvx2*np.cos(self.euler[0])+self.desvy2*np.sin(self.euler[0])))
+                    vy1 = int(2000*(self.desvy2*np.cos(self.euler[0])-self.desvx2*np.sin(self.euler[0])))
+                    vz1 = int(2000*self.params.phase[0])
+                else:
+                    # Read joystick ---------------------------------------------
+                    for i in range(self.joyaxes):
+                        self.joyinputs[i] = self.joy.get_axis(i)
+                    self.joyyaw = self.joyyaw -self.joyinputs[0]/100
+                    vx1 = int(-self.joyinputs[4]*4000)
+                    vy1 = int(-self.joyinputs[3]*2000)
+                    vz1 = int(-self.joyinputs[1]*2000+6000)
+                    Cyaw = int(self.joyyaw*AngleScaling)
+
 
                 Croll = vy1
                 CS[0] = vx1
 
-                toSend = [vx1,vy1,vz1, Cyaw, 0, 0, r1,e1]
-                for i in range(8):
+                toSend = [vx1,vy1,vz1, Cyaw]
+                for i in range(4):
                     if toSend[i] > 32767:
                         toSend[i] = 32767
                     elif toSend[i] < -32767:
                         toSend[i] = -32767
-                xb_send(0, command.INTEGRATED_VICON, pack('8h',*toSend))
+                xb_send(0, command.SET_VELOCITY, pack('4h',*toSend))
                 self.xbee_sending = 0
+                print(vx1, vy1, vz1, Cyaw)
 
             # Printing
             #print(self.step_ind,ctrl[1],ctrl[2],ctrl[3]) # Deadbeat
@@ -1311,7 +1368,7 @@ class ORI:
             #print "pos: %3.2f %3.2f %3.2f \tvel: %3.2f %3.2f \tacc: %3.2f %3.2f" % (self.desx, self.desy, self.desyaw, self.desvx, self.desvy, self.desax, self.desay)
 
             #print(int(self.acc[2]), self.step_ind, self.last_step)
-            print(self.step_ind, ctrl[0], ctrl[1], ctrl[2], ctrl[3])
+            #print(self.step_ind, ctrl[0], ctrl[1], ctrl[2], ctrl[3])
 
             # Publish commands
             self.ctrl_pub_rol.publish(Croll)
@@ -1400,7 +1457,7 @@ class ORI:
             self.params.phase[0] = pts[self.step_ind, 4]
             self.params.phase[1] = pts[self.step_ind, 5]
         elif (self.ctrl_mode == 0): # Raibert
-            self.params.phase[0] = 60
+            self.params.phase[0] = 65
             self.params.phase[1] = 80
 
         # Where are we going to touch down?
