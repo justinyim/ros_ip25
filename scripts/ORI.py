@@ -28,7 +28,7 @@ import salto_optitrack_config
 EXIT_WAIT = False
 
 # Salto:
-salto_name = 3 # 1: Salto-1P Santa, 2: Salto-1P Rudolph, 3: Salto-1P Dasher
+salto_name = 2 # 1: Salto-1P Santa, 2: Salto-1P Rudolph, 3: Salto-1P Dasher
 
 # Parameters
 alpha_v = 0.8 # velocity first-order low-pass
@@ -57,47 +57,93 @@ off_mat[0:3,3] = pos_off
 #k_file = sio.loadmat('/home/justin/Berkeley/FearingLab/Jumper/robotdata/physicalDeadbeatCurveFit1.mat')
 #k = k_file['a_nl'].T
 
-'''
-k = [[   -0.2110,         0,         0], # New Dasher gains from runridMotor15.
-[         0,         0,   -0.0087],
-[    0.0708,         0,         0],
-[         0,   -0.0687,         0],
-[         0,         0,    0.0077],
-[         0,         0,    0.0001],
-[         0,         0,   -0.0018],
-[         0,         0,   -0.0053],
-[         0,         0,   -0.0118],
-[         0,         0,    0.0254],
-[   -0.0396,         0,         0],
-[    0.0164,         0,         0],
-[         0,   -0.0189,         0],
-[   -0.0124,         0,         0],
-[   -0.0521,         0,         0],
-[         0,    0.0541,         0],
-[    0.0036,         0,         0],
-[         0,         0,    0.0005],
-[   -0.0060,         0,         0],
-[         0,    0.0068,         0],
-[         0,         0,    0.0098],
-[   -0.0024,   -0.0000,    0.0000],
-[   -0.0069,    0.0000,   -0.0000],
-[   -0.0000,   -0.0029,    0.0000],
-[   -0.0000,    0.0047,   -0.0000],
-[   -0.0000,    0.0000,   -0.0002],
-[   -0.0000,    0.0000,   -0.0021],
-[    0.0000,   -0.0000,   -0.0055],
-[   -0.0000,    0.0000,   -0.0035],
-[    0.0000,    0.0000,   -0.0026],
-[    0.0000,   -0.0000,   -0.0118]]
+#'''
+k = [
+   [-0.2124,         0,         0],
+   [      0,         0,   -0.0111],
+   [ 0.0668,         0,         0],
+   [      0,   -0.0662,         0],
+   [      0,         0,   -0.0086],
+   [      0,         0,    0.0009],
+   [      0,         0,   -0.0014],
+   [      0,         0,   -0.0029],
+   [      0,         0,   -0.0056],
+   [      0,         0,    0.0050],
+   [-0.0364,         0,         0],
+   [ 0.0240,         0,         0],
+   [      0,   -0.0270,         0],
+   [-0.0060,         0,         0],
+   [-0.0416,         0,         0],
+   [      0,    0.0421,         0],
+   [ 0.0026,         0,         0],
+   [      0,         0,    0.0008],
+   [-0.0040,         0,         0],
+   [      0,    0.0049,         0],
+   [      0,         0,    0.0017],
+   [-0.0014,   -0.0000,   -0.0000],
+   [-0.0052,    0.0000,    0.0000],
+   [ 0.0000,   -0.0016,   -0.0000],
+   [-0.0000,    0.0028,    0.0000],
+   [ 0.0000,   -0.0000,    0.0005],
+   [ 0.0000,    0.0000,   -0.0006],
+   [-0.0000,   -0.0000,   -0.0011],
+   [ 0.0000,   -0.0000,   -0.0011],
+   [ 0.0000,    0.0000,   -0.0005],
+   [-0.0000,   -0.0000,   -0.0034]
+] # New Dasher gains from runridMotor16.
+
 k = np.matrix(k).T
 
 x_op = np.array([0, -3.3, 0, 0, 3.3]) # Operating (equilibrium) point state
-u_op = np.array([0, 0, 0.24]) # Operating point equilibrium control input
+u_op = np.array([0, 0, 0.2275]) # Operating point equilibrium control input
+
+usePlatform = 1
+#'''
+
+'''
+k = [
+   [-0.2093,         0,         0],
+   [      0,         0,   -0.0102],
+   [ 0.0726,         0,         0],
+   [      0,   -0.0724,         0],
+   [      0,         0,   -0.0107],
+   [      0,         0,    0.0010],
+   [      0,         0,   -0.0011],
+   [      0,         0,   -0.0030],
+   [      0,         0,   -0.0055],
+   [      0,         0,   -0.0005],
+   [-0.0359,         0,         0],
+   [ 0.0233,         0,         0],
+   [      0,   -0.0265,         0],
+   [-0.0053,         0,         0],
+   [-0.0400,         0,         0],
+   [      0,    0.0403,         0],
+   [ 0.0025,         0,         0],
+   [      0,         0,    0.0005],
+   [-0.0036,         0,         0],
+   [      0,    0.0046,         0],
+   [      0,         0,   -0.0010],
+   [-0.0013,   -0.0000,    0.0000],
+   [-0.0049,    0.0000,   -0.0000],
+   [ 0.0000,   -0.0015,   -0.0000],
+   [-0.0000,    0.0025,    0.0000],
+   [-0.0000,    0.0000,    0.0003],
+   [ 0.0000,   -0.0000,   -0.0007],
+   [ 0.0000,    0.0000,   -0.0012],
+   [-0.0000,    0.0000,   -0.0010],
+   [ 0.0000,   -0.0000,   -0.0008],
+   [-0.0000,    0.0000,   -0.0036]
+] # New Dasher gains from runridMotor15.
+
+k = np.matrix(k).T
+
+x_op = np.array([0, -3.3, 0, 0, 3.3]) # Operating (equilibrium) point state
+u_op = np.array([0, 0, 0.2275]) # Operating point equilibrium control input
 
 usePlatform = 1
 '''
 
-#'''
+'''
 k = [[   -0.2080,         0,         0], # Gains now modified from runGridMotor10.mat
 [         0,         0,    -0.0143],
 [    0.0780,         0,         0],
@@ -135,7 +181,7 @@ x_op = np.array([0, -3.3, 0, 0, 3.3]) # Operating (equilibrium) point state
 u_op = np.array([0, 0, 0.24]) # Operating point equilibrium control input
 
 usePlatform = 1
-#'''
+'''
 
 '''
 k = [[   -0.3000,         0,         0],
@@ -171,6 +217,13 @@ k = [[   -0.3000,         0,         0],
 [         0,         0,    0.0000]]
 k = np.matrix(k).T
 '''
+
+# Scaling constants
+AngleScaling = 3667; # rad to 15b 2000deg/s integrated 1000Hz
+    # 180(deg)/pi(rad) * 2**15(ticks)/2000(deg/s) * 1000(Hz) = 938734
+    # 938734 / 2**8 = 3667
+LengthScaling = 256; # radians to 23.8 fixed pt radians
+CurrentScaling = 256; # radians to 23.8 fixed pt radians
 
 class ORI:
     def __init__(self):
@@ -229,9 +282,11 @@ class ORI:
         self.unheard_flag = 0
         self.xbee_sending = 1
         self.MJ_state = 0 # 0: run, 1: stand, 2: stop
-        self.ctrl_mode = 2 # 0: Old Raibert, 1: deadbeat curve fit, 2: New Raibert velocity
+        self.ctrl_mode = 1 # 0: Old Raibert, 1: deadbeat curve fit, 2: New Raibert velocity
         self.onboard_control = False # use onboard calculated control and feed velocity commands
         self.use_joystick = False
+        self.started = 0 # 0: not started, 1: started
+        self.extra_flag = 0
 
         # ROS
         self.tf_pub = tf.TransformBroadcaster()
@@ -272,13 +327,13 @@ class ORI:
                 # Motor gains format:
         #  [ Kp , Ki , Kd , Kaw , Kff     ,  Kp , Ki , Kd , Kaw , Kff ]
         #    ----------LEFT----------        ---------_RIGHT----------
-        motorgains = [110,0,25,0,0, 0,0,0,0,0]
-        thrustgains = [160,0,190,100,0,150]
+        motorgains = [100,0,20,0,0, 0,0,0,0,0]
+        thrustgains = [170,0,150,100,0,150]
         #motorgains = [0,0,0,0,0, 0,0,0,0,0]
         #thrustgains = [0,0,0, 0,0,0]
         # roll kp, ki, kd; yaw kp, ki, kd
 
-        duration = 8000
+        duration = 15000
         rightFreq = thrustgains # thruster gains
         if salto_name == 1:
             leftFreq = [0.16, 0.2, 0.5, .16, 0.12, 0.25] # Raibert-like gains
@@ -342,16 +397,68 @@ class ORI:
         # get gyro bias
         unusedBiasSignal = [0]
         xb_send(0, command.GYRO_BIAS, pack('h', *unusedBiasSignal))
-        time.sleep(1)
+        time.sleep(0.1)
+
+        # BALANCING ON TOE
+        #'''
+        modeSignal = [0]
+        xb_send(0, command.ONBOARD_MODE, pack('h', *modeSignal))
+        time.sleep(0.02)
+
+        standTailGains = [180,0,20,0,0, 0,0,0,0,0]
+        standThrusterGains = [250,0,180, 100,0,150]
+        zeroGains = [0,0,0,0,0, 0,0,0,0,0]
+        xb_send(0, command.SET_THRUST_OPEN_LOOP, pack('6h', *standThrusterGains))
+        time.sleep(0.02)
+
+        xb_send(0, command.SET_PID_GAINS, pack('10h',*zeroGains))
+        time.sleep(0.02)
+
+        xb_send(0, command.RESET_BODY_ANG, pack('h', *unusedBiasSignal))
+        time.sleep(0.02)
+
+        xb_send(0, command.G_VECT_ATT, pack('h', *unusedBiasSignal))
+        time.sleep(0.02)
+
+        modeSignal = [3]
+        xb_send(0,command.ONBOARD_MODE, pack('h', *modeSignal))
+        time.sleep(0.02)
+        #'''
 
         # start
         startTelemetrySave(self.numSamples)
         exp = [2]
         stopSignal = [0]
-        viconTest = [0,0,0,0,0,0,0,0]
-        xb_send(0, command.INTEGRATED_VICON, pack('8h', *viconTest))
         xb_send(0, command.START_EXPERIMENT, pack('h', *exp))
         
+        # BALANCING ON TOE
+        '''
+        time.sleep(1.5)
+        xb_send(0, command.SET_PID_GAINS, pack('10h',*standTailGains))
+        time.sleep(3.5)
+        '''
+        
+        #startTelemetrySave(self.numSamples)
+
+        # BALANCING ON TOE
+        #'''
+        # Mocap control
+        modeSignal = [0]
+        # Immediately on onboard control
+        #self.onboard_control = True
+        #self.use_joystick = False
+        #modeSignal = [24]#[8]#[56]
+        
+        xb_send(0, command.ONBOARD_MODE, pack('h', *modeSignal))
+        time.sleep(0.03)
+
+        xb_send(0, command.SET_PID_GAINS, pack('10h', *motorgains))
+        time.sleep(0.03)
+        xb_send(0, command.SET_THRUST_OPEN_LOOP, pack('6h', *thrustgains))
+        #'''
+
+        self.started = 1
+
         self.startTime = time.time()
         self.wpT = time.time()
         self.ind = 0
@@ -406,14 +513,16 @@ class ORI:
         elif data.a == 8: # use onboard Raibert controller
             newMode = [8]
             self.onboard_control = True
+            self.use_joystick = False
+            self.ctrl_mode = 2 # use Raibert velocity when we return
             xb_send(0, command.ONBOARD_MODE, pack('h', *newMode))
-        elif data.a == 9: # use joystick
+        elif data.a == 9: # use joystick with onboard velocity control
             self.use_joystick = True
-            self.ctrl_mode = 0 # use original Raibert when we return
+            self.ctrl_mode = 2 # use Raibert velocity when we return
             newMode = [8]
             self.onboard_control = True
             xb_send(0, command.ONBOARD_MODE, pack('h', *newMode))
-        elif data.a == 10: # use joystick only with mocap attitude control
+        elif data.a == 10: # use joystick with mocap attitude control
             self.use_joystick = True
             self.ctrl_mode = 2 # use Raibert velocity
             newMode = [0]
@@ -461,6 +570,19 @@ class ORI:
             self.decimate_count = 0
         else:
             return
+
+        # HACKY EXPERIMENT -----------
+        if self.started and time.time() - self.startTime > 10 and self.extra_flag == 0 and self.vel[2,0] > 1.0 and self.pos[2,0] > 0.5:
+            disturb = [0, 0, -320] # 64 ticks per degree
+            xb_send(0, command.ADJUST_BODY_ANG, pack('3h', *disturb))
+            self.extra_flag = 1
+
+        '''
+        if self.started and time.time() - self.startTime > 30 and self.extra_flag == 1 and self.vel[2,0] > 0 and self.pos[2,0] > 0.5:
+            disturb = [0, 0, -192]
+            xb_send(0, command.ADJUST_BODY_ANG, pack('3h', *disturb))
+            self.extra_flag = 2
+        '''
 
         # VICON DATA ------------------------------------------------
         # Extract transform from message
@@ -1014,7 +1136,7 @@ class ORI:
             ])
         '''
 
-        '''
+        #'''
         # New Raibert velocity (first FPV path)
         steppts = np.array([
             [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 1],
@@ -1039,7 +1161,7 @@ class ORI:
             [-0.3, 0.2, 0.05, 0.0,    3.5, 80, 0],
             [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
             ])
-        '''
+        #'''
 
         '''
         # Good!2
@@ -1084,23 +1206,21 @@ class ORI:
         '''
 
         '''
+        # Up and down
         steppts = np.array([
-            [-0.5, 0.0, 0.0,     3.68, 80, 0],
-            [-0.5, 0.0, 0.0,     3.68, 80, 0],
-            [-0.5, 0.0, 0.0,     3.68, 80, 0],
-            [0.0, 0.0, 0.0,      3.68, 80, 0],
-            [1.5, 0.0, 0.0,      3.68, 80, 0],
-            [1.8, 0.0, 0.0,      3.68, 80, 0],
-            [1.8, 0.0, 0.0,      3.27, 80, 0],
-            [1.8, 0.3, 0.0,      3.27, 80, 0],
-            [1.8, 0.6, 0.0,      3.27, 80, 0],
-            [1.5, 0.6, 0.0,      3.27, 80, 0],
-            [1.2, 0.6, 0.0,      3.27, 80, 0],
-            [0.9, 0.6, 0.0,      3.68, 80, 0],
-            [0.6, 0.6, 0.0,      3.68, 80, 0],
-            [0.3, 0.6, 0.0,      3.27, 80, 0],
-            [0.0, 0.6, 0.0,      3.27, 80, 0],
-            [0.0, 0.6, 0.0,      2.5, 80, 0],
+            [0.0, 0.0, 0.0, 0.0,     3.0, 80, 1],
+            [0.0, 0.0, 0.0, 0.0,     3.0, 80, 0],
+            [0.0, 0.0, 0.0, 0.0,     3.0, 80, 0],
+            [0.0, 0.0, 0.0, 0.0,     3.0, 80, 0],
+            [0.0, 0.0, 0.0, 0.0,     3.5, 80, 0],
+            [0.0, 0.0, 0.0, 0.0,     3.5, 80, 0],
+            [0.0, 0.0, 0.0, 0.0,     3.5, 80, 0],
+            [0.0, 0.0, 0.0, 0.0,     2.5, 80, 0],
+            [0.0, 0.0, 0.0, 0.0,     2.5, 80, 0],
+            [0.0, 0.0, 0.0, 0.0,     2.5, 80, 0],
+            [0.0, 0.0, 0.0, 0.0,     2.0, 80, 0],
+            [0.0, 0.0, 0.0, 0.0,     2.0, 80, 0],
+            [0.0, 0.0, 0.0, 0.0,     2.0, 80, 0],
             ])
         '''
 
@@ -1255,13 +1375,6 @@ class ORI:
                 [-0.3, -0.3, 0.0,       0.0, 0.0, 63, 80, 4.0, 0],
                 [-0.3, -0.3, 0.0,       0.0, 0.0, 67, 80, 3.0, 0]]) # slow down
         #'''
-        
-        # Scaling constants
-        AngleScaling = 3667; # rad to 15b 2000deg/s integrated 1000Hz
-            # 180(deg)/pi(rad) * 2**15(ticks)/2000(deg/s) * 1000(Hz) = 938734
-            # 938734 / 2**8 = 3667
-        LengthScaling = 256; # radians to 23.8 fixed pt radians
-        CurrentScaling = 256; # radians to 23.8 fixed pt radians
 
         # Read joystick
         pygame.event.pump() # joystick
@@ -1306,7 +1419,7 @@ class ORI:
         Cyaw = int(AngleScaling*self.desyaw)
         Croll = int(AngleScaling*ctrl[0])
 
-        if self.MJ_state == 0:
+        if self.MJ_state == 0 and self.started == 1:
             self.xbee_sending = 1
 
             '''
@@ -1327,22 +1440,50 @@ class ORI:
                 self.xbee_sending = 0
             else:
                 if self.use_joystick == False:
-                    vx1 = int(2000*(self.desvx2*np.cos(self.euler[0])+self.desvy2*np.sin(self.euler[0])))
-                    vy1 = int(2000*(self.desvy2*np.cos(self.euler[0])-self.desvx2*np.sin(self.euler[0])))
-                    vz1 = int(2000*self.params.phase[0])
+                    # Using deadbeat velocity planner (too agressive)
+                    #vx1 = int(2000*(self.desvx2*np.cos(self.euler[0])+self.desvy2*np.sin(self.euler[0])))
+                    #vy1 = int(2000*(self.desvy2*np.cos(self.euler[0])-self.desvx2*np.sin(self.euler[0])))
+                    #vz1 = int(self.params.phase[0]*2000)
+
+                    # Less agressive with yaw
+                    vx1 = int(2000*(-1.0*(np.cos(self.euler[0])*self.pos[0,0]+np.sin(self.euler[0])*self.pos[1,0])))# - self.vel[0,0]))
+                    vy1 = int(2000*(-1.0*(-np.sin(self.euler[0])*self.pos[0,0]+np.cos(self.euler[0])*self.pos[1,0])))# - self.vel[1,0]))
+                    vz1 = int(2000*2.5)
+
+                    # Less agressive without yaw
+                    #vx1 = int(2000*(-1.0*self.pos[0,0]))# - self.vel[0,0]))
+                    #vy1 = int(2000*(-1.0*self.pos[1,0]))# - self.vel[1,0]))
+                    #vz1 = int(2000*2.5)
+
+                    # Slow spin
+                    #Cyaw = int(AngleScaling*max(0.1*(time.time()-self.startTime-10),0))
+
+                    # Up and down
+                    vz1 = int(2000*(3 + 0.5*np.sin(time.time() - self.startTime)))
+                    vx1 = int(vx1*(vz1-1)/6000)
+                    vy1 = int(vy1*(vz1-1)/6000)
                 else:
                     # Read joystick ---------------------------------------------
                     for i in range(self.joyaxes):
                         self.joyinputs[i] = self.joy.get_axis(i)
-                    self.joyyaw = self.joyyaw -self.joyinputs[0]/100
-                    vx1 = int(-self.joyinputs[4]*4000)
-                    vy1 = int(-self.joyinputs[3]*2000)
-                    vz1 = int(-self.joyinputs[1]*2000+6000)
+                    self.joyyaw = self.joyyaw -0.5*self.joyinputs[0]/100
+                    vz1 = int(np.sqrt(self.joyinputs[2]*1.7+2.3)*4000)
+                    vx1 = int(-self.joyinputs[4]*6000*(vz1-2000)/6000)
+                    vy1 = int(-self.joyinputs[3]*3000*(vz1-2000)/6000)
                     Cyaw = int(self.joyyaw*AngleScaling)
+
+                    if self.joy.get_button(5):
+                        stopSignal = [0]
+                        xb_send(0,command.STOP_EXPERIMENT, pack('h', *stopSignal))
+                        time.sleep(0.02)
+                        xb_send(0,command.STOP_EXPERIMENT, pack('h', *stopSignal))
+                        time.sleep(0.02)
+
 
 
                 Croll = vy1
                 CS[0] = vx1
+                CS[2] = vz1
 
                 toSend = [vx1,vy1,vz1, Cyaw]
                 for i in range(4):
@@ -1352,7 +1493,7 @@ class ORI:
                         toSend[i] = -32767
                 xb_send(0, command.SET_VELOCITY, pack('4h',*toSend))
                 self.xbee_sending = 0
-                print(vx1, vy1, vz1, Cyaw)
+                #print(vx1, vy1, vz1, Cyaw)
 
             # Printing
             #print(self.step_ind,ctrl[1],ctrl[2],ctrl[3]) # Deadbeat
@@ -1368,7 +1509,7 @@ class ORI:
             #print "pos: %3.2f %3.2f %3.2f \tvel: %3.2f %3.2f \tacc: %3.2f %3.2f" % (self.desx, self.desy, self.desyaw, self.desvx, self.desvy, self.desax, self.desay)
 
             #print(int(self.acc[2]), self.step_ind, self.last_step)
-            #print(self.step_ind, ctrl[0], ctrl[1], ctrl[2], ctrl[3])
+            print(self.step_ind, ctrl[0], ctrl[1], ctrl[2], ctrl[3])
 
             # Publish commands
             self.ctrl_pub_rol.publish(Croll)
@@ -1739,7 +1880,8 @@ class ORI:
         '''
 
         # calculate crank angle from foot extension
-        crank = 2.034*10**5*l**5 - 6.661*10**4*l**4 + 7215*l**3 - 141.8*l**2 + 1.632*l + 0.03071 
+        crank = 1.109*10**5*l**5 - 2.511*10**4*l**4 + 1377*l**3 + 155.4*l**2 + 0.3454*l + 0.1792
+        #crank = 2.034*10**5*l**5 - 6.661*10**4*l**4 + 7215*l**3 - 141.8*l**2 + 1.632*l + 0.03071
         motor = 25*crank # motor angle from crank angle and gear ratio
 
         motor = min(max(motor, 52),80)
