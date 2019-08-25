@@ -342,7 +342,7 @@ class ORI:
         elif salto_name == 2:
             motorgains = [80,80,0, 160,110,0, 110,18,0,0]
         elif salto_name == 3:
-            motorgains = [100,100,0, 150,135,0, 75,11,0,0]
+            motorgains = [80,40,0, 110,120,0, 75,12,0,0]
 
         duration = 15000
         rightFreq = thrustgains # thruster gains
@@ -382,6 +382,7 @@ class ORI:
         # BEGIN -----------------------
         rospy.init_node('ORI')
         rospy.Subscriber('Robot_1/pose', Pose, self.callback)
+        #rospy.Subscriber('vicon/Dasher/Dasher', TransformStamped, self.callback) # Vicon
 
         if usePlatform:
             rospy.Subscriber('Body_2/pose', Pose, self.callbackPlatform)
@@ -444,6 +445,7 @@ class ORI:
         exp = [2]
         stopSignal = [0]
         xb_send(0, command.START_EXPERIMENT, pack('h', *exp))
+        time.sleep(0.03)
         
         # BALANCING ON TOE
         '''
@@ -469,6 +471,7 @@ class ORI:
         xb_send(0, command.SET_PID_GAINS, pack('10h', *motorgains))
         time.sleep(0.03)
         xb_send(0, command.SET_THRUST_OPEN_LOOP, pack('6h', *thrustgains))
+        time.sleep(0.03)
         #'''
 
         self.started = 1
@@ -600,10 +603,21 @@ class ORI:
 
         # VICON DATA ------------------------------------------------
         # Extract transform from message
+        #'''
+        # Original Optitrack
         rot = data.orientation
         tr = data.position
         q = np.array([rot.x, rot.y, rot.z, rot.w])
         pos = np.array([tr.x, tr.y, tr.z])
+        #'''
+
+        '''
+        # Vicon
+        rot = data.transform.rotation
+        tr = data.transform.translation
+        q = np.array([rot.x, rot.y, rot.z, rot.w])
+        pos = np.array([tr.x, tr.y, tr.z])
+        '''
 
         # Convert to homogeneous coordinates
         HV = quaternion_matrix(q)
@@ -667,6 +681,40 @@ class ORI:
         # DEADBEAT --------------------------------------------------
         #waypts = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 3.27, 80, 3.0, 2]]) # in place deadbeat
         steppts = np.array([[0.0, 0.0, 0.05, 0.0,     3.0, 80, 0]]) # deadbeat step planner in place
+
+
+        '''
+        #Cantilever hops
+        steppts = np.array([
+            [-1.0, 0.2, 0.05, 0.0,     3.4, 80, 1],
+            [-1.0, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [-1.0, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [-1.0, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [-0.8, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [-0.4, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [0.0, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [0.4, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [0.8, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [1.2, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [1.3, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [1.3, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [1.3, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [1.3, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [1.3, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [1.3, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [1.3, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [1.3, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [1.3, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [1.3, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [1.2, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [0.8, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [0.4, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [0.0, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [-0.4, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            [-0.8, 0.2, 0.05, 0.0,     3.4, 80, 0],
+            ]) # deadbeat step planner up ramp onto cantilever
+        '''
+
 
         '''
         # Hopping to different heights
@@ -1292,7 +1340,7 @@ class ORI:
             ])
         '''
 
-        '''
+        #'''
         # New Raibert velocity (first FPV path)
         steppts = np.array([
             [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 1],
@@ -1317,7 +1365,65 @@ class ORI:
             [-0.3, 0.2, 0.05, 0.0,    3.5, 80, 0],
             [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
             ])
+        #'''
+
         '''
+        # Wall jump
+        steppts = np.array([
+            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [-0.3, 0.0, 0.05, 0.0,    3.5, 80, 0],
+            [-0.3, 0.0, 0.05, 0.0,    3.8, 80, 0],
+            [-0.3, 0.0, 0.05, 0.0,    3.8, 80, 0],
+            [0.0, 0.0, 0.05, 0.0,    3.8, 80, 0],
+            [0.5, 0.0, 0.05, 0.0,    3.8, 80, 0],
+            [0.9, 0.0, 0.4,  0.0,    3.0, 80, 0],
+            [-0.6, 0.0, 0.05, 0.0,    3.8, 80, 0],
+            [-0.6, 0.0, 0.05,  0.0,    3.5, 80, 0],
+            ])
+        '''
+
+        '''
+        # Chimney ascent
+        steppts = np.array([
+            [-0.3, -0.6, 0.05, 1.6,    3.5, 80, 0],
+            [-0.3, -0.6, 0.05, 1.6,    3.5, 80, 0],
+            [-0.3, -0.6, 0.05, 1.6,    3.5, 80, 0],
+            [-0.3, -0.6, 0.05, 1.6,    3.5, 80, 0],
+            [-0.3, -0.6, 0.05, 1.6,    3.8, 80, 0],
+            [-0.3, -0.6, 0.05, 1.6,    3.8, 80, 0],
+            [0.0, -0.1, 0.05, 1.6,     3.8, 80, 0],
+            [0.3, 0.6, 0.4, 1.6,       3.8, 80, 0],
+            [0.5, -0.6, 0.6,  1.6,     3.0, 80, 0],
+            [0.5, 0.6, 0.8, 1.6,       3.0, 80, 0],
+            [0.5, -0.6, 0.6,  1.6,     3.0, 80, 0],
+            [0.3, 0.6, 0.4,  1.6,      3.0, 80, 0],
+            [-0.1, -0.6, 0.0,  1.6,    3.5, 80, 0],
+            [-0.3, -0.8, 0.0,  1.6,    3.0, 80, 0],
+            ])
+        '''
+
+        '''
+        # Chimney ascent try 2
+        steppts = np.array([
+            [-0.3,  0.6, 0.05,  0.0,    3.3, 80, 0],
+            [-0.3,  0.6, 0.05,  0.0,    3.3, 80, 0],
+            [-0.3,  0.6, 0.05,  0.0,    3.5, 80, 0],
+            [-0.3,  0.6, 0.05,  0.0,    3.5, 80, 0],
+            [-0.3,  0.6, 0.05,  0.0,    3.8, 80, 0],
+            [-0.3,  0.6, 0.05,  0.0,    3.8, 80, 0],
+            [0.2,   0.2, 0.05,  0.0,    3.8, 80, 0],
+            [1.2,  -0.2,  0.4,  0.0,    2.7, 80, 0],
+            [-0.3, -0.3,  0.6,  0.0,    2.7, 80, 0],
+            [1.2,  -0.3,  0.8,  0.0,    2.7, 80, 0],
+            [-0.3, -0.3,  0.6,  0.0,    2.7, 80, 0],
+            [1.2,  -0.2,  0.4,  0.0,    2.7, 80, 0],
+            [0.4,   0.3,  0.0,  0.0,    3.5, 80, 0],
+            [-0.3,  0.7,  0.0,  0.0,    3.0, 80, 0],
+            ])
+        '''
+
 
         '''
         # Good!2
@@ -1690,10 +1796,20 @@ class ORI:
             #    self.telemetry_read = 1
 
 
+        #'''
+        # Original Optitrack
         #t = data.header.stamp.to_sec()
         t = rospy.Time.now
         x = np.array([data.position.x,data.position.y,data.position.z,data.orientation.w, data.orientation.x,data.orientation.y,data.orientation.z,t])
         self.tf_pub.sendTransform((x[4], x[5], x[6]), (x[0], x[1], x[2], x[3]), rospy.Time.now(), "jumper", "world")
+        #'''
+
+        '''
+        # Vicon
+        t = data.header.stamp.to_sec()
+        x = np.array([data.transform.rotation.x,data.transform.rotation.y,data.transform.rotation.z,data.transform.rotation.w, data.transform.translation.x,data.transform.translation.y,data.transform.translation.z,t])
+        self.tf_pub.sendTransform((x[4], x[5], x[6]), (x[0], x[1], x[2], x[3]), rospy.Time.now(), "jumper", "world")
+        '''
 
 
     def Steppoints(self, pts): 
@@ -2041,8 +2157,8 @@ class ORI:
         motor = 25*crank + retractOffset # motor angle from crank angle and gear ratio
 
         motor = min(max(motor, 54),80)
-        roll = min(max(roll, -math.pi/6), math.pi/6)
-        pitch = min(max(pitch, -math.pi/6), math.pi/6)
+        roll = min(max(roll, -math.pi/4), math.pi/4)
+        pitch = min(max(pitch, -math.pi/4), math.pi/4)
 
         ctrl = [roll,pitch,motor,ext]
 

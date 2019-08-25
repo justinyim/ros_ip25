@@ -52,7 +52,7 @@ for topic, msg, t in rosbag.Bag(name).read_messages():
         
         #print t, pos[0], pos[1], pos[2], euler[0], euler[1], euler[2]
         poseFile.write(str(t) + ", " + str(pos[0]) + ", " + str(pos[1]) + ", " + str(pos[2]) + ", " + str(euler[0]) + ", " + str(euler[1]) + ", " + str(euler[2]) + "\n")
-    elif topic == '/Body_2/pose':
+    elif topic == '/Body_2/pose' or topic == '/Cantilever_1/pose':
         data = msg
         
         # Extract transform from message
