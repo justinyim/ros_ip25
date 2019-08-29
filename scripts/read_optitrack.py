@@ -9,7 +9,7 @@ import time,sys,os,traceback
 import salto_optitrack_config
 
 rot_off = quaternion_about_axis(0,(1,1,1)) # robot rotation from Vicon body frame
-pos_off = [0.0165,0.07531,-0.04] # coords of the robot origin in the Vicon body frame
+pos_off = [0,0,0]#[0.0165,0.07531,-0.04] # coords of the robot origin in the Vicon body frame
 
 name = sys.argv[1]
 salto_name = sys.argv[2]
