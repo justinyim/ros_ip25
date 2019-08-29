@@ -116,10 +116,11 @@ class VelocityRead:
 
 
         # # Balance control tilt once to 9/4*a*T^2 rad and 1/2*a*T rad/s
-        a = 20#-25.0# angular acceleration (rad/s^2)
-        T = 0.08#0.05# # time scale (s)
+        a = 30#-25.0# angular acceleration (rad/s^2)
+        T = 0.07#0.05# # time scale (s)
         motorExtend = 76 # radians
-        t_motor = 0.17 # seconds
+        t_motor = 0.14 #0.16 # 0.17 # seconds
+        t_spin = -0.01 #disable 0.08 # seconds
 
         k1 = 0
         k2 = -15
@@ -195,7 +196,6 @@ class VelocityRead:
         xb_send(0, command.SET_PID_GAINS, pack('10h',*zeroGains))
         time.sleep(0.02)
 
-        #viconTest = [0,0,0,0,0,0,60*256,80*256]#55*256,70*256]
         viconTest = [0,0,0, 0,3667*rollOff,0, 0*256,0*256]#55*256,70*256]
         xb_send(0, command.INTEGRATED_VICON, pack('8h', *viconTest))
         time.sleep(0.02)
@@ -221,7 +221,13 @@ class VelocityRead:
         time.sleep(1.5)
         
         xb_send(0, command.SET_PID_GAINS, pack('10h',*standTailGains))
-        time.sleep(1.98)
+        time.sleep(0.98)
+
+        viconTest = [0,0,0, 0,3667*rollOff,0, 30*256,30*256]#55*256,70*256]
+        xb_send(0, command.INTEGRATED_VICON, pack('8h', *viconTest))
+        time.sleep(0.02)
+
+        time.sleep(0.98)
 
         modeSignal = [16]
         xb_send(0, command.ONBOARD_MODE, pack('h', *modeSignal))
@@ -325,7 +331,7 @@ class VelocityRead:
 
           # t_launchStart = 9.1815*T - t_motor
 
-          if t > t_launchStart and t < (t_launchStart + 0.08):
+          if t > t_launchStart and t < (t_launchStart + t_spin):
             Mdd = Mdd - 0.5
 
           # Send tilt command
@@ -407,7 +413,7 @@ class VelocityRead:
           # # New leg control
           time.sleep(0.2)
           cmd = [0,0,0,0,\
-          (0.12)*2**16, 0.0*2000, (0)*1024,\
+          (0.12)*2**16, 0.0*2000, (0.0)*1024,\
           k1, k2]
           xb_send(0, command.STANCE, pack('9h', *cmd))
           time.sleep(0.01)
