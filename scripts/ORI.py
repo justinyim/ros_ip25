@@ -28,14 +28,14 @@ import salto_optitrack_config
 EXIT_WAIT = False
 
 # Salto:
-salto_name = 3 # 1: Salto-1P Santa, 2: Salto-1P Rudolph, 3: Salto-1P Dasher
+salto_name = 2 # 1: Salto-1P Santa, 2: Salto-1P Rudolph, 3: Salto-1P Dasher
 
 # Parameters
 alpha_v = 0.8 # velocity first-order low-pass
 alpha_a = 0.6 # acceleration first-order low-pass
 dt = 0.01#(1.0/120.0)# 0.01 # Optitrack frame time step
 rot_off = quaternion_about_axis(0,(1,1,1)) # robot rotation from Vicon body frame
-pos_off = [0.0165,0.07531,-0.04] # coords of the robot origin in the Vicon body frame
+pos_off = [0,0,0] #[0.0165,0.07531,-0.04] # coords of the robot origin in the Vicon body frame
 #[0.00587, 0.0165, -0.07531]
 #[0.0165,0.07531,-0.00587]
 yaw_rate = 0.8 # yaw rate in rad/s
@@ -344,7 +344,7 @@ class ORI:
         elif salto_name == 3:
             motorgains = [80,40,0, 110,120,0, 75,12,0,0]
 
-        duration = 15000
+        duration = 1000#15000
         rightFreq = thrustgains # thruster gains
         if salto_name == 1:
             leftFreq = [0.16, 0.2, 0.5, .16, 0.12, 0.25] # Raibert-like gains

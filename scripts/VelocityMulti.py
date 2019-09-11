@@ -113,10 +113,10 @@ class VelocityRead:
         self.x = np.matrix([0,0,0,0,0,0]).T
         self.P = self.P_init
 
-
+        self.yawOff = 0.0
 
         # # Balance control tilt once to 9/4*a*T^2 rad and 1/2*a*T rad/s
-        a = 0#0.001# angular acceleration (rad/s^2)
+        a = 30#0.001# angular acceleration (rad/s^2)
         b = 0.1
         T = 0.07#0.55# # time scale (s)
         motorExtend = 76#     86.5#78#    84.5#67.5#50.5#     # radians
@@ -126,7 +126,7 @@ class VelocityRead:
         k2 = -15
         airRetract = (motorExtend-80.0)*0.5 + 60.0
         
-        toHop = 0 # make a small jump (1) or not (0)
+        toHop = 1 # make a small jump (1) or not (0)
 
         rollOff = -0.01#-0.02
 
@@ -150,7 +150,7 @@ class VelocityRead:
         self.extra_flag = 0
         s = rospy.Service('MJ_state_server',MJstate,self.handle_MJ_state)
 
-        duration = 2500
+        duration = 13000#2500
         telemetry = True
         repeat = False
 
@@ -223,127 +223,179 @@ class VelocityRead:
         xb_send(0, command.SET_PID_GAINS, pack('10h',*standTailGains))
         time.sleep(0.5)
 
-        viconTest = [0,0,0, 0,3667*rollOff,0, 30*256,30*256]#55*256,70*256]
-        xb_send(0, command.INTEGRATED_VICON, pack('8h', *viconTest))
-        time.sleep(0.02)
 
-        time.sleep(1.0)
+        #xs = [-0.9, -0.5, -0.2]
+        #zs = [0.395, 0.395, 0.0]
+        #vzs = [3.8, 3.5, 2.0]
 
-        modeSignal = [16]
-        xb_send(0, command.ONBOARD_MODE, pack('h', *modeSignal))
-        time.sleep(0.02)
+        xs = [-0.8, -0.5, -0.2]
+        zs = [0.142, 0.395, 0.0]
+        vzs = [3.0, 4.0, 2.0]
 
-        t0 = time.time()
-        t = 0.0
-        tEnd = 13.0*T#T#
-        while t < tEnd:
-          # Md is in 2^15/(2000*pi/180)~=938.7 ticks/rad
-          t = time.time() - t0
+        #xs = [-0.9, -0.8, -0.5]
+        #zs = [0.0, 0.0, 0.0]
+        #vzs = [3.0, 2.5, 3.5]
 
-          # if t < 0.0:
-          #   Mddd = 0.0
-          #   Mdd = 0.0
-          #   Md = 0.0
-          #   M = 0.0
-          # elif t < T+0.05:
-          #   tr = t - 0.0
-          #   Mddd = (a*np.exp(tr/b))/b**2
-          #   Mdd = 1/(200*b) + (a*(np.exp(tr/b) - 1))/b
-          #   Md = (tr/200 - a*tr)/b - a + a*np.exp(tr/b) + 1/200
-          #   M = tr/200 - a*tr + a*b*(np.exp(tr/b) - 1) - (tr**2*(a - 1/200))/(2*b)
-          # else:
-          #   Mddd = 0.0
-          #   Mdd = 0.0
-          #   Md = 0.0
-          #   M = 0.0
-          # t_launchStart = (T - t_motor)
+        for i in range(len(xs)):
+            dx = xs[i] - self.pos[0,0]
+            dy = - self.pos[1,0]
+            dz = zs[i] - (self.pos[2,0] - 0.09)
+            vz = vzs[i]
+            l = 0.14
+            g = 9.81
 
-          if t < 0.0:
-            Mddd = 0.0
-            Mdd = 0.0
-            Md = 0.0
-            M = 0.0
-          elif t < T:
-            tr = t - 0.0
-            Mddd = a*(tr/(2*T) - 1)
-            Mdd = -(a*tr*(4*T - tr))/(4*T)
-            Md = -(a*tr**2*(6*T - tr))/(12*T)
-            M = -(a*tr**3*(8*T - tr))/(48*T)
-          elif t < 3*T:
-            tr = t - T
-            Mddd = -a*(tr/(2*T) - 1)
-            Mdd = (a*tr*(4*T - tr))/(4*T) - (3*T*a)/4
-            Md = - (5*T**2*a)/12 - (a*tr*(3*T - tr)**2)/(12*T)
-            M = - (7*T**3*a)/48 - (a*tr*(9*T*tr + 10*T**2 - 4*tr**2))/24 - (a*tr**4)/(48*T)
-          elif t < (11*T)/2:
-            tr = t - 3*T
-            Mddd = 0
-            Mdd = (T*a)/4
-            Md = (T*a*tr)/4 - (7*T**2*a)/12
-            M = - (71*T**3*a)/48 - (T*a*tr*(14*T - 3*tr))/24
-          elif t < (15*T)/2:
-            tr = t - (11*T)/2
-            Mddd = (a*tr)/(4*T)
-            Mdd = (T*a)/4 + (a*tr**2)/(8*T)
-            Md = (T**2*a)/24 + (a*tr*(6*T**2 + tr**2))/(24*T)
-            M = (a*tr**4)/(96*T) - (69*T**3*a)/32 + (T*a*tr*(T + 3*tr))/24
-          elif t < (17*T)/2:
-            tr = t - (15*T)/2
-            Mddd = (3*a*(tr/T - 1))/2
-            Mdd = (3*T*a)/4 - (3*a*tr*(2*T - tr))/(4*T)
-            Md = (7*T**2*a)/8 + (a*tr**3)/(4*T) + (3*a*tr*(T - tr))/4
-            M = (a*tr*(3*T*tr + 7*T**2 - 2*tr**2))/8 - (45*T**3*a)/32 + (a*tr**4)/(16*T)
-          elif t < (317/36+1)*T:
-            tr = t - (17*T)/2
-            Mddd = 0
-            Mdd = 0
-            Md = (9*T**2*a)/8
-            M = (9*T**2*a*tr)/8 - (11*T**3*a)/32
-          else:
-            Mddd = 0.0
-            Mdd = 0.0
-            Md = 0.0
-            M = 0.0
-          t_launchStart = (317*T/36 - t_motor)
+            if (dx**2 + dy**2)**0.5 > 0.1:
+                self.yawOff = np.arctan(dy/dx)/2
 
-          # Send tilt command
-          tiltCmd = [M*938.7, Md*938.7, Mdd*938.7, Mddd*938.7/2.0]
-          for ind in range(4):
-            if tiltCmd[ind] > 32767:
-              tiltCmd[ind] = 32767
-              print 'TOO LARGE'
-            elif tiltCmd[ind] < -32768:
-              tiltCmd[ind] = -32768
-              print 'TOO SMALL'
-          xb_send(0, command.TILT, pack('4h', *tiltCmd))
-          print tiltCmd
-          time.sleep(0.01)
+            dur = vz/g + (vz**2 - 2*dz*g)**0.5/g
+            vx = dx*g*vz/(2.0*g*l + vz*(vz**2 - 2*dz*g)**0.5 + vz**2)
+            v = (vx**2 + vz**2)**0.5
+            motorExtend = 17*v+18.5
+            th = np.arctan(vx/vz)
+            if th > 0:
+                th_adjust = 0.0005*(motorExtend-30.0)
+                th = th+th_adjust
 
-          if t > t_launchStart and toHop == 1: # begin launch
-            # Normal
-            viconTest = [0,0,0, 0,3667*rollOff,0, motorExtend*256,motorExtend*256]
-            xb_send(0, command.INTEGRATED_VICON, pack('8h', *viconTest))
-            time.sleep(0.01)
-            xb_send(0, command.SET_PID_GAINS, pack('10h',*runTailGains))
+            a = 8.0*th/(9.0*T**2)
+            # rollOff = -0.01 - dy/dur
+            # if rollOff > 0.02:
+            #     rollOff = 0.02
+            # if rollOff < -0.02:
+            #     rollOff = -0.02
+            toHop = 1
+            print [dx, a, th, motorExtend]
+
+            cmd = [0,0,0,0,rollOff,0]
+            xb_send(0, command.LAUNCH, pack('6h',*cmd))
             time.sleep(0.02)
-            toHop = 2
-              
-          if t > 11.0*T and toHop == 2: # prepare for landing
-            # Hop once and stop
-            viconTest = [0,0,0, 0,0,0, airRetract*256,25*256]
+
+            viconTest = [0,0,0, 0,3667*rollOff,0, 30*256,30*256]#55*256,70*256]
             xb_send(0, command.INTEGRATED_VICON, pack('8h', *viconTest))
-            time.sleep(0.01)
-        
-        if toHop:
-          # New leg control
-          time.sleep(0.2)
-          cmd = [0,0,0,0,\
-          (0.12)*2**16, 0.0*2000, (0.0)*1024,\
-          k1, k2]
-          xb_send(0, command.STANCE, pack('9h', *cmd))
-          time.sleep(0.01)
-          xb_send(0, command.SET_PID_GAINS, pack('10h',*standTailGains))
-          time.sleep(0.02)
+            time.sleep(0.02)
+
+            time.sleep(1.0)
+
+            modeSignal = [16]
+            xb_send(0, command.ONBOARD_MODE, pack('h', *modeSignal))
+            time.sleep(0.02)
+
+            t0 = time.time()
+            t = 0.0
+            tEnd = 13.0*T#T#
+            while t < tEnd:
+              # Md is in 2^15/(2000*pi/180)~=938.7 ticks/rad
+              t = time.time() - t0
+
+              # if t < 0.0:
+              #   Mddd = 0.0
+              #   Mdd = 0.0
+              #   Md = 0.0
+              #   M = 0.0
+              # elif t < T+0.05:
+              #   tr = t - 0.0
+              #   Mddd = (a*np.exp(tr/b))/b**2
+              #   Mdd = 1/(200*b) + (a*(np.exp(tr/b) - 1))/b
+              #   Md = (tr/200 - a*tr)/b - a + a*np.exp(tr/b) + 1/200
+              #   M = tr/200 - a*tr + a*b*(np.exp(tr/b) - 1) - (tr**2*(a - 1/200))/(2*b)
+              # else:
+              #   Mddd = 0.0
+              #   Mdd = 0.0
+              #   Md = 0.0
+              #   M = 0.0
+              # t_launchStart = (T - t_motor)
+
+              if t < 0.0:
+                Mddd = 0.0
+                Mdd = 0.0
+                Md = 0.0
+                M = 0.0
+              elif t < T:
+                tr = t - 0.0
+                Mddd = a*(tr/(2*T) - 1)
+                Mdd = -(a*tr*(4*T - tr))/(4*T)
+                Md = -(a*tr**2*(6*T - tr))/(12*T)
+                M = -(a*tr**3*(8*T - tr))/(48*T)
+              elif t < 3*T:
+                tr = t - T
+                Mddd = -a*(tr/(2*T) - 1)
+                Mdd = (a*tr*(4*T - tr))/(4*T) - (3*T*a)/4
+                Md = - (5*T**2*a)/12 - (a*tr*(3*T - tr)**2)/(12*T)
+                M = - (7*T**3*a)/48 - (a*tr*(9*T*tr + 10*T**2 - 4*tr**2))/24 - (a*tr**4)/(48*T)
+              elif t < (11*T)/2:
+                tr = t - 3*T
+                Mddd = 0
+                Mdd = (T*a)/4
+                Md = (T*a*tr)/4 - (7*T**2*a)/12
+                M = - (71*T**3*a)/48 - (T*a*tr*(14*T - 3*tr))/24
+              elif t < (15*T)/2:
+                tr = t - (11*T)/2
+                Mddd = (a*tr)/(4*T)
+                Mdd = (T*a)/4 + (a*tr**2)/(8*T)
+                Md = (T**2*a)/24 + (a*tr*(6*T**2 + tr**2))/(24*T)
+                M = (a*tr**4)/(96*T) - (69*T**3*a)/32 + (T*a*tr*(T + 3*tr))/24
+              elif t < (17*T)/2:
+                tr = t - (15*T)/2
+                Mddd = (3*a*(tr/T - 1))/2
+                Mdd = (3*T*a)/4 - (3*a*tr*(2*T - tr))/(4*T)
+                Md = (7*T**2*a)/8 + (a*tr**3)/(4*T) + (3*a*tr*(T - tr))/4
+                M = (a*tr*(3*T*tr + 7*T**2 - 2*tr**2))/8 - (45*T**3*a)/32 + (a*tr**4)/(16*T)
+              elif t < (317/36+1)*T:
+                tr = t - (17*T)/2
+                Mddd = 0
+                Mdd = 0
+                Md = (9*T**2*a)/8
+                M = (9*T**2*a*tr)/8 - (11*T**3*a)/32
+              else:
+                Mddd = 0.0
+                Mdd = 0.0
+                Md = 0.0
+                M = 0.0
+              t_launchStart = (317*T/36 - t_motor)
+
+              # Send tilt command
+              tiltCmd = [M*938.7, Md*938.7, Mdd*938.7, Mddd*938.7/2.0]
+              for ind in range(4):
+                if tiltCmd[ind] > 32767:
+                  tiltCmd[ind] = 32767
+                  print 'TOO LARGE'
+                elif tiltCmd[ind] < -32768:
+                  tiltCmd[ind] = -32768
+                  print 'TOO SMALL'
+              xb_send(0, command.TILT, pack('4h', *tiltCmd))
+              #print tiltCmd
+              time.sleep(0.01)
+
+              if t > t_launchStart and toHop == 1: # begin launch
+                # Normal
+                viconTest = [0,0,0, 0,3667*rollOff,0, motorExtend*256,motorExtend*256]
+                xb_send(0, command.INTEGRATED_VICON, pack('8h', *viconTest))
+                time.sleep(0.01)
+                xb_send(0, command.SET_PID_GAINS, pack('10h',*runTailGains))
+                time.sleep(0.02)
+                toHop = 2
+                  
+              if t > 11.0*T and toHop == 2: # prepare for landing
+                # Hop once and stop
+                viconTest = [0,0,0, 0,0,0, airRetract*256,25*256]
+                xb_send(0, command.INTEGRATED_VICON, pack('8h', *viconTest))
+                time.sleep(0.01)
+            
+            if toHop:
+              # New leg control
+              time.sleep(0.2)
+              cmd = [0,0,0,0,\
+              (0.12)*2**16, 0.0*2000, (0.0)*1024,\
+              k1, k2]
+              xb_send(0, command.STANCE, pack('9h', *cmd))
+              time.sleep(0.01)
+              xb_send(0, command.SET_PID_GAINS, pack('10h',*standTailGains))
+              time.sleep(0.02)
+
+            time.sleep(1.0)
+            modeSignal = [17]
+            xb_send(0, command.ONBOARD_MODE, pack('h', *modeSignal))
+            time.sleep(0.02)
+
 
         time.sleep(4.0)
         stopSignal = [0]
@@ -484,7 +536,10 @@ class VelocityRead:
         for i in range(3):
           self.vel[i,0] = min(max(self.vel[i,0],-8),8)
 
-        velocitySignal = [int(self.vel[0,0]*2000), int(self.vel[1,0]*2000), int(self.vel[2,0]*2000), int(euler[0]*AngleScaling)]
+        vBx = self.vel[0,0]*np.cos(euler[0]) + self.vel[1,0]*np.sin(euler[0])
+        vBy = -self.vel[0,0]*np.sin(euler[0]) + self.vel[1,0]*np.cos(euler[0])
+
+        velocitySignal = [int(vBx*2000), int(vBy*2000), int(self.vel[2,0]*2000), int((euler[0]-self.yawOff)*AngleScaling)]
         if self.MJ_state == 0:
           xb_send(0, command.SET_MOCAP_VEL, pack('4h', *velocitySignal))
           rospy.sleep(0.001)
